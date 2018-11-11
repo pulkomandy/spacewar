@@ -59,7 +59,31 @@
 #include "Collidible.h"
 #include "Planetarium.h"
 
-double Random()
+// "interesting and often changed constants"
+// (original values in octal, not allowed in JS strict-mode, see comments)
+
+                                                     // sym   value  unit/comment
+                                                     // -------------------------------
+static const int
+	torpedoSupply =                         32,  // tno     040  (number of)
+	torpedoVelocity =                        4,  // tvl  sar 4s  (right shift)
+ 	torpedoReloadTime =                     16,  // rlt     020  (frames)
+	torpedoLife =                           96,  // tlf    0140  (frames)
+	fuelSupply =                          8192,  // foo  020000  (per exhaust blip)
+	spaceshipAcceleration =                  4,  // sac  sar 4s  (right shift)
+	starCaptureRadius =                      1,  // str      01  (greater zero)
+	collisionRadius =                       48,  // me1   06000  (screen coors)
+	collisionRadius2 =                      24,  // me2   03000  (above/2)
+	torpedoSpaceWarpage =                    9,  // the  sar 9s  (right shift)
+	hyperspaceShots =                        8,  // mhs     010  (number of)
+	hyperspaceTimeBeforeBreakout =          32,  // hd1     040  (frames)
+	hyperspaceTimeInBreakout =              64,  // hd2    0100  (frames)
+	hyperspaceRechargeTime =               128,  // hd3    0200  (frames)
+	hyperspaceDisplacement =                 9,  // hr1  scl 9s  (left shift)
+	hyperspaceInducedVelocity =              4,  // hr2  scl 4s  (left shift)
+	hyperspcaceUncertancy =              16384;  // hur  040000  (threshold bonus)
+
+static double Random()
 {
 	return (double)random() / RAND_MAX;
 }
@@ -100,12 +124,14 @@ struct _Options {
 		if (key == "SUNOFF")          return SUNOFF;
 		if (key == "TESTWORDCONTROLS") return TESTWORDCONTROLS;
 		if (key == "HALTONSCORES")    return HALTONSCORES;
-		if (key == "FPS")             return FPS;
+		/*if (key == "FPS")*/         return FPS;
 	}
 } Options;
 
-_CRT CRT;
+// static vars
 
+int timer;
+_CRT CRT;
 _UI SpacewarUI;
 
 // display constants (for readability)
@@ -113,26 +139,34 @@ static const int SCREENWIDTH = 1024,
     COORS_MAX = SCREENWIDTH/2,
     QUADRANT  = COORS_MAX/2;
 
-    static constexpr int outline1[] = {           // spaceship 1 (needle)
-            1, 1, 1, 1, 3, 1,
-            1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 6, 3,
-            3, 1, 1, 1, 1, 1,
-            1, 4, 6, 1, 1, 1,
-            1, 1, 1, 1, 1, 4,
-            7, 0, 0, 0, 0, 0
-	};
-	static constexpr int outline2[] = {           // spaceship 2 (wedge)
-            0, 1, 3, 1, 1, 3,
-            1, 1, 3, 1, 1, 1,
-            1, 1, 6, 3, 1, 3,
-            1, 3, 1, 1, 1, 1,
-            1, 6, 1, 1, 5, 1,
-            1, 1, 1, 6, 3, 3,
-            3, 6, 5, 1, 1, 4,
-            7, 0, 0, 0, 0, 0
-	};
+static constexpr double BIN_RAD_COEF = M_PI / 51472;  // PI is 51472 (0144420 oct) in PDP-1
+static constexpr double TAU = M_PI * 2;               // 2 PI
+
+
+
+static constexpr int outline1[] = {           // spaceship 1 (needle)
+	1, 1, 1, 1, 3, 1,
+	1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 6, 3,
+	3, 1, 1, 1, 1, 1,
+	1, 4, 6, 1, 1, 1,
+	1, 1, 1, 1, 1, 4,
+	7, 0, 0, 0, 0, 0
+};
+
+static constexpr int outline2[] = {           // spaceship 2 (wedge)
+	0, 1, 3, 1, 1, 3,
+	1, 1, 3, 1, 1, 1,
+	1, 1, 6, 3, 1, 3,
+	1, 3, 1, 1, 1, 1,
+	1, 6, 1, 1, 5, 1,
+	1, 1, 1, 6, 3, 3,
+	3, 6, 5, 1, 1, 4,
+	7, 0, 0, 0, 0, 0
+};
+
+static constexpr int nob = 24;        // number of objects
 
 // plot int co-ordinates, normalized (x: 0..1024, y: 0..1024, origin top-left) to CRT
 void plot(double x, double y, int b) {
@@ -150,143 +184,16 @@ std::vector<CollidibleObject*> mtb;        // table of objects
 
 static int score1;      // score spaceship 1
 static int score2;      // score spaceship 2
-    static int restartCounter;
-    static int gameCounter;
-    static int halted;
-    static unsigned int testword;
+static int restartCounter;
+static int gameCounter;
+static int halted;
+static unsigned int testword;
 
-class Spacewar {
+static Planetarium ExpensivePlanetarium;
+
+struct Point {double x; double y;};
+class Spaceship: public CollidibleObject {
 	public:
-	Spacewar();
-
-    // main -- start a game
-
-    void run(char* options[]) {
-        // initialize any sense switch flags (optional)
-        // e.g., Spacewar.run( { SUNKILLS: true } );
-        //for (int k = 0; options[k]; k++) setOption(k, options[k]);
-
-        // start the game
-        ExpensivePlanetarium.reset();
-        restartCounter = 0;
-        frame();
-        if (timer) clearInterval(timer);
-        timer = setInterval(frame, floor(1000 / Options.FPS));
-    }
-
-    /*
-      setter for spaceship control input
-          Spacewar.setControls( 0, FIRE, true )
-      reset state by Spacewar.setControls( 0, RESET )
-      or    Spacewar.setControls( 0, ALL, false )
-    */
-    void setControls(int spaceship, int key, int value = false) {
-        if (mtb.empty()) return; // not started, yet: ignore
-        // sanitize input
-        int s = spaceship | 0;
-        if (s < 0 || s > 1) return;
-        int b = key | 0;
-        if (!legalInputs[b]) return;
-
-        // finally, manipulate the bit-vector in property 'ctrl'
-        Spaceship* obj = (Spaceship*)mtb[s];
-        obj->ctrl = ( (value)? obj->ctrl | b : obj->ctrl & (~b) ) & ALL;
-    }
-
-
-	private:
-    // constants for triangular math (rotation)
-
-    static constexpr double BIN_RAD_COEF = M_PI / 51472;  // PI is 51472 (0144420 oct) in PDP-1
-    static constexpr double TAU = M_PI * 2;               // 2 PI
-
-	static Planetarium ExpensivePlanetarium;
-
-
-    // "interesting and often changed constants"
-    // (original values in octal, not allowed in JS strict-mode, see comments)
-
-                                                     // sym   value  unit/comment
-                                                     // -------------------------------
-    static const int
-		torpedoSupply =                         32,  // tno     040  (number of)
-        torpedoVelocity =                        4,  // tvl  sar 4s  (right shift)
-        torpedoReloadTime =                     16,  // rlt     020  (frames)
-        torpedoLife =                           96,  // tlf    0140  (frames)
-        fuelSupply =                          8192,  // foo  020000  (per exhaust blip)
-        spaceshipAcceleration =                  4,  // sac  sar 4s  (right shift)
-        starCaptureRadius =                      1,  // str      01  (greater zero)
-        collisionRadius =                       48,  // me1   06000  (screen coors)
-        collisionRadius2 =                      24,  // me2   03000  (above/2)
-        torpedoSpaceWarpage =                    9,  // the  sar 9s  (right shift)
-        hyperspaceShots =                        8,  // mhs     010  (number of)
-        hyperspaceTimeBeforeBreakout =          32,  // hd1     040  (frames)
-        hyperspaceTimeInBreakout =              64,  // hd2    0100  (frames)
-        hyperspaceRechargeTime =               128,  // hd3    0200  (frames)
-        hyperspaceDisplacement =                 9,  // hr1  scl 9s  (left shift)
-        hyperspaceInducedVelocity =              4,  // hr2  scl 4s  (left shift)
-        hyperspcaceUncertancy =              16384;  // hur  040000  (threshold bonus)
-    static constexpr double angularAcceleration =     8 * BIN_RAD_COEF;  // maa     010  (turn, PI: 0144420)
-
-    // ship outline codes
-
-    /*
-      the screen is represented internally like the DEC type 30 display:
-      1048 x 1048 at 7 intensities, origin at the center.
-      while the original uses a fixed point format (fx10.18) for positions,
-      floats are used in the JS implementation.
-      intensities are 3 bit values, one's complement (+3 .. -3).
-      higher intensities also cause bigger spot-sizes (blips).
-      the original display is a point plotted device (animated display),
-      meaning there's no memory or frame buffer: blips will be activated
-      and fade away (in the afterglow of the Type 30 CRT's P7 phospor).
-
-      co-ordinates are as in the PDP-1 with positive axis up and right:
-
-                 +512
-
-      -511        0/0         +512
-
-                 -511
-    */
-
-    static constexpr bool legalInputs[] = { false, true, true, false, true, false, false, false, true, false, false, false, true, false, false, true };
-
-    // static vars
-
-    static constexpr int nob = 24;        // number of objects
-    int timer;
-
-    /*
-      The testword (var testword) represents the state of an array of switches at
-      the operator's console for 18-bit input.
-      If Options.TESTWORDCONTROLS is set, input propagates to spaceship controls
-      as follows: "high order 4 bits, rotate ccw, rotate cw, (both mean hyperspace)
-      fire rocket, and fire torpedo. Low order 4 bits, same for other ship."
-      -- player 1: bits 17 .. 14 (left, right, thrust, fire)
-      -- player 2: bits  3 .. 0  (left, right, thrust, fire)
-
-      bits 5 .. 10 are related to scoring (bits 6 .. 10: number of games per match)
-
-      bits:         17 16 15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
-      usage:         -PLAYER 1-          GAMES P. MATCH SC     -PLAYER 2-
-      semantics:     L  R  T  F          16  8  4  2  1        L  R  T  F
-                     |  |                => 0..31 GAMES        |  |
-                  HYPERSPACE                                HYPERSPACE
-
-      SC: Show scores in single game mode or after the next game in match mode.
-      (Here, scores will be displayed anyway.) If cleared, when resumed from a
-      halt for the score display, scores are reset.
-    */
-
-
-    // constructors (symbols/pointers of the original program in parentheses)
-
-
-
-    struct Point {double x; double y;};
-	class Spaceship: public CollidibleObject {
-		public:
 		Spaceship()
 			: CollidibleObject()
 		{
@@ -314,349 +221,40 @@ class Spacewar {
         int ctrl;
         double angularMomentum;
         int lastCtrl;
+};
 
-		private:
+// object handlers, this-object is current object (see mainLoop)
 
-	};
+static void toroidalize(CollidibleObject& obj) {
+	// util for toroidal space (in original maintained by word length)
+	if (obj.x <= -COORS_MAX) {
+		obj.x += SCREENWIDTH;
+	}
+	else if (obj.x > COORS_MAX) {
+		obj.x -= SCREENWIDTH;
+	}
+	if (obj.y <= -COORS_MAX) {
+		obj.y += SCREENWIDTH;
+	}
+	else if (obj.y > COORS_MAX) {
+		obj.y -= SCREENWIDTH;
+	}
+}
 
-    static void newGame() {  /* (label a40) */
-        int i;
-		Spaceship* ss1;
-		Spaceship* ss2;
-
-		ss1 = new Spaceship();
-		ss2 = new Spaceship();
-
-        // clear and init table of objects (label a2)
-		for(auto i: mtb)
-			delete i;
-        mtb.clear();
-        mtb.push_back(ss1);
-        mtb.push_back(ss2);
-        for (i = 2; i < nob; i++) mtb.push_back( new CollidibleObject() );
-
-        // setup spaceships (label a2, a3)
-        ss1->handler = spaceshipHandler;
-        ss1->collidible = true;
-        ss2->handler = spaceshipHandler;
-        ss2->collidible = true;
-        ss1->x =  QUADRANT;
-        ss1->y =  QUADRANT;
-        ss2->x = -QUADRANT;
-        ss2->y = -QUADRANT;
-        ss1->theta = M_PI;
-        ss2->theta = 0;
-        ss1->outline = compileOutline<outline1>;
-        ss2->outline = compileOutline<outline2>;
-        ss1->torpedoes = ss2->torpedoes = torpedoSupply;
-        ss1->fuel = ss2->fuel = fuelSupply;
-        ss1->hyp2 = ss2->hyp2 = hyperspaceShots;
-        // explosion size will be derived from this (orig: instruction count)
-        ss1->size = ss2->size = 1024;
-    }
-
-    static void frame() {  /* (label a) */
-        Spaceship* ss1;
-		Spaceship* ss2;
-		int thriving1, thriving2, endOfMatch = false;
-        if (!halted) {
-
-            // end of game and restart checks, executed at start of each frame
-            // (these were external patches in version 2b)
-            if (restartCounter == 0) {  /* (label a6) */
-                // here after halt (scores display) or at first run
-                if ((testword & 32) == 0) {
-                    // clear scores on testword bit 5 zero
-                    score1 = score2 = 0;
-                    displayScores(); // notify UI, if found
-                    // read new number of games for match play (0 .. 31)
-                    gameCounter = (testword >> 6) & 31;
-                }
-                newGame();
-            }
-            // check, if ships are alive and have any torpedoes left
-            ss1 = (Spaceship*)mtb[0];
-            ss2 = (Spaceship*)mtb[1];
-            thriving1 = (ss1->handler == spaceshipHandler);
-            thriving2 = (ss2->handler == spaceshipHandler);
-            if (thriving1 && thriving2
-            	&& (ss1->torpedoes > 0 || ss2->torpedoes > 0)) {
-            	// reset restart-counter
-                restartCounter = 2 * torpedoLife;
-            }
-            else if (--restartCounter == 0) { // count down to scoring
-                // count-down reached: whoever is still alive is awarded a score
-                if (thriving1) score1 = (score1 + 1) % 0x3FFFF; // 18 bit overflow
-                if (thriving2) score2 = (score2 + 1) % 0x3FFFF;
-                displayScores(); // display scores anyway (original see below)
-                // check match-play
-                if (gameCounter > 0) {
-                    if (--gameCounter == 0) { // count down
-                        // end of a match
-                        if (score1 == score2) {
-                            // it's a tie, one more game
-                            gameCounter = 1;
-                        }
-                        else {
-                            endOfMatch = true;
-                        }
-                    }
-                }
-                // halt (to show scores), if match over or bit 5 in testword set,
-                // else start over
-                if (endOfMatch || (testword & 32)) {
-                    // original puts score 1 into AC and score 2 in IO and halts
-                    // displayScores();
-                    if (Options.HALTONSCORES) {
-                        halted = true;
-                        haltSignal(); // notify UI, if found
-                    }
-                    return; // we'll resume at the top, since restartCounter is still zero
-                }
-                else {
-                    // no special case, restart the game
-                    newGame();
-                    restartCounter = 1; // not in original (fix resume-after-halt logic)
-                }
-            }
-
-            // finally advance to the main loop ...
-            // (in the original program input is read at the start of each spaceship handler)
-            // read special input (normally expected to be set by 'Spacewar.setControls()')
-            if (Options.TESTWORDCONTROLS) {
-                // map testword bits to spaceship controls
-                ((Spaceship*)mtb[0])->ctrl = (testword >> 14) & 15;
-                ((Spaceship*)mtb[1])->ctrl = testword & 15;
-            }
-            readGamepads();
-            mainLoop();
-        }
-        CRT.update(); // external UI, not in original
-    }
-
-    static void mainLoop() {  /* (label ml0, ml1) */
-        CollidibleObject* obj1;
-		CollidibleObject* obj2;
-	   int	nnn = nob - 1;
-        // loop over objects
-        for (int i = 0; i < nnn; i++) {
-            obj1 = mtb[i];
-            // is it active?
-            if (obj1->handler) {
-                // can it colide?
-                if (obj1->collidible) {
-                    // comparison loop
-                    for (int j = i + 1; j < nob; j++) {
-                        obj2 = mtb[j];
-                        // collidible?
-                        if (obj2->collidible) {
-                            double dx = fabs(obj1->x - obj2->x);
-                            if (dx  < collisionRadius) {
-                                double dy = fabs(obj1->y - obj2->y);
-                                if (dy < collisionRadius && dx + dy < collisionRadius2) {
-                                    // explode
-                                    obj1->handler = obj2->handler = explosionHandler;
-                                    obj1->collidible = obj2->collidible = false;
-                                    // set up explosion time & size
-                                    obj1->counter = obj2->counter = (obj1->size + obj2->size - 1) >> 8;
-                                }
-                            }
-                        }
-                    }
-                }
-                // call the object's method
-                obj1->handler(obj1);
-            }
-        }
-        // handle last object, if any
-        obj1 = mtb[nnn];
-        if (obj1->handler) obj1->handler(obj1);
-
-        if (!Options.NOBACKGROUND)
-			ExpensivePlanetarium.update(); // background stars
-        if (!Options.SUNOFF)
-			drawHeavyStar();    // gravtational star ("sun")
-    }
-
-    // object handlers, this-object is current object (see mainLoop)
-
-    static void spaceshipHandler(CollidibleObject* co) {  /* (label sr0) */
-		Spaceship* ship = (Spaceship*)co;
-        double am, Sin, Cos, bx, by, t1, t2, ssn, scn, sx1, sy1, stx, sty, ssm,
-			ssc, ssd, scm, csn, src, csm;
-	   int	m, f, thrusting = false;
-	   Point p;
-	   CollidibleObject* torp;
-        // rotation
-        am = ship->angularMomentum;
-        if (ship->ctrl & LEFT)  am += angularAcceleration;
-        if (ship->ctrl & RIGHT) am -= angularAcceleration;
-        if (Options.ANGULARMOMENTUM) {
-            ship->angularMomentum = am;
-        }
-        else {
-            ship->angularMomentum = 0;
-            am *= 128; // 1<<7
-        }
-        ship->theta += am;
-        // limit to +/- 2*PI
-        if (ship->theta > TAU) {
-            ship->theta -= TAU;
-        }
-        else if (ship->theta < -TAU) {
-            ship->theta += TAU;
-        }
-        Sin = sin(ship->theta);
-        bx = by = 0;
-        // gravity computations
-        if (!Options.SUNOFF) {
-            t1 = ship->x / 8;
-            t2 = ship->y / 8;
-            t1 = t1 * t1 + t2 * t2;
-            if (t1 < starCaptureRadius) { // in sun (label pof)
-                ship->dx = ship->dy = 0;
-                if (Options.SUNKILLS) { // explode (label po1)
-                    ship->handler = explosionHandler;
-                    ship->collidible = false;
-                    ship->counter = 8;
-                }
-                else { // set ship to "anti pode"
-                    ship->x = ship->y = COORS_MAX;
-                }
-                return;
-            }
-            t1 = (sqrt(t1) * t1) / 2;
-            if (!Options.LOWGRAVITY) t1 /= 4;
-            bx = -ship->x / t1;
-            by = -ship->y / t1;
-        }
-        // ... and back to business ...
-        Cos = cos(ship->theta);
-        // rockets fired?
-        if ((ship->ctrl & THRUST) && ship->fuel) {
-            f = 1 << spaceshipAcceleration; // use div instead of right shift
-            by += Cos / f;
-            bx -= Sin / f;
-            thrusting = true;
-        }
-        // update positions
-        ship->dy += by;
-        ship->y  += ship->dy / 8;
-        ship->dx += bx;
-        ship->x  += ship->dx / 8;
-        toroidalize(*ship);
-        // half a ship's length
-        ssn = Sin * 16;
-        scn = Cos * 16;
-        // outline start pos (stern, ahead of center)
-        sx1 = ship->x - ssn;
-        sy1 = ship->y + scn;
-        // torpedoes will show up here
-        stx = sx1 - ssn;
-        sty = sy1 + scn;
-        // draw the ship and update drawing pos to end of outline
-        ssn = Sin;
-        scn = Cos;
-        ssm = ssn;
-        ssc = ssn + scn;
-        ssd = ssc;
-        csn = ssn - scn;
-        csm = -csn;
-        scm = scn;
-        p = ship->outline(sx1, sy1, ssn, scn, ssm, ssc, ssd, csn, csm, scm);
-        sx1 = p.x;
-        sy1 = p.y;
-        // draw exhausts
-        if (thrusting) {
-            src = floor(Random() * 16);
-            ssn = Sin * 2;
-            scn = Cos * 2;
-            // fuel consumption is a function of the blast's length!
-            while (ship->fuel > 0 && --src > 1) {
-                ship->fuel--;
-                sx1 += ssn;
-                sy1 -= scn;
-                plot (sx1, sy1, 0);
-            }
-        }
-        if (ship->counter > 0) { // torpedo cooling
-            ship->counter--;
-        }
-        else if ( // fire, no single-shot-lock, and torpedoes left?
-            (ship->ctrl & FIRE)
-            && (!Options.SINGLESHOTS || !(ship->lastCtrl & FIRE))
-            && ship->torpedoes
-        ) {
-            ship->torpedoes--;
-            // find empty object and set up the torpedo
-            for (m = 2; m < nob; m++) {
-                if (!mtb[m]->handler) {
-                    torp = mtb[m];
-                    torp->handler = torpedoHandler;
-                    torp->collidible = true;
-                    torp->x = stx;
-                    torp->y = sty;
-                    f = 1 << torpedoVelocity; // use div instead of right shift
-                    torp->dx = ship->dx - Sin * 512 / f;
-                    torp->dy = ship->dy + Cos * 512 / f;
-                    torp->size = 16;
-                    torp->counter = torpedoLife;
-                    ship->counter = torpedoReloadTime;
-                    break;
-                }
-            }
-        }
-        // hyperspace
-        if (ship->hyp3 > 0) { // cooling
-            ship->hyp3--;
-        }
-        else if (ship->hyp2 > 0) { // jumps remaining?
-            // are controls for left and right set and was neither of them set before?
-            // (last condition is thought to inhibit accidental jumps.
-            //  ignored in original, since the last control word is never saved,
-            //  works out as "if (this.ctrl) & Controls.HYPERSPACE)".)
-            if ((((~ship->ctrl) | ship->lastCtrl) & HYPERSPACE) == 0) {
-                ship->hyp1 = ship->handler;
-                ship->handler = hyperspaceHandler;
-                ship->collidible = false;
-                ship->counter = hyperspaceTimeBeforeBreakout;
-                // this.size = 3; // not used here
-            }
-        }
-        // store last control word (missing in original)
-        ship->lastCtrl = ship->ctrl;
-    }
-
-    static void toroidalize(CollidibleObject& obj) {
-        // util for toroidal space (in original maintained by word length)
-        if (obj.x <= -COORS_MAX) {
-            obj.x += SCREENWIDTH;
-        }
-        else if (obj.x > COORS_MAX) {
-            obj.x -= SCREENWIDTH;
-        }
-        if (obj.y <= -COORS_MAX) {
-            obj.y += SCREENWIDTH;
-        }
-        else if (obj.y > COORS_MAX) {
-            obj.y -= SCREENWIDTH;
-        }
-    }
-
-    static void explosionHandler(CollidibleObject* obj) {  /* (label mex) */
-        double x, y;
-	    int mxc, f;
-        obj->y += obj->dy / 8;
-        obj->x += obj->dx / 8;
-        toroidalize(*obj);
-        // particles
-        mxc = obj->size >> 3;
-        do {
-            /*
-              algorithm:
-              1) set up number of right shifts: (mxc > 96)? 1:3
-              2) set up number of left shifts: random number int 0..9
-              (shifts apply to a combined 36-bit register, 18 bits x and y each,
+static void explosionHandler(CollidibleObject* obj) {  /* (label mex) */
+	double x, y;
+	int mxc, f;
+	obj->y += obj->dy / 8;
+	obj->x += obj->dx / 8;
+	toroidalize(*obj);
+	// particles
+	mxc = obj->size >> 3;
+	do {
+		/*
+			algorithm:
+			1) set up number of right shifts: (mxc > 96)? 1:3
+			2) set up number of left shifts: random number int 0..9
+			(shifts apply to a combined 36-bit register, 18 bits x and y each,
                sign preserved in x. [x = AC, y = IO])
               3) set x and y to signed 9-bit random numbers
               4) apply right shifts (combined registers)
@@ -668,326 +266,713 @@ class Spacewar {
               mult/div factors are 1 << n.
               any sign flips in y are ignored (just a random number).
             */
-            f = (1 << (int)(floor(Random() * 9))) / ((mxc > 96)? 2:8);
-            x = (Random() - 0.5) * 2 * f;
-            y = (Random() - 0.5) * 2 * f;
-            plot(obj->x + x, obj->y + y, 3);
-        } while (--mxc > 0);
-        if (--obj->counter <= 0) obj->handler = NULL;
-    }
+		f = (1 << (int)(floor(Random() * 9))) / ((mxc > 96)? 2:8);
+		x = (Random() - 0.5) * 2 * f;
+		y = (Random() - 0.5) * 2 * f;
+		plot(obj->x + x, obj->y + y, 3);
+	} while (--mxc > 0);
+	if (--obj->counter <= 0) obj->handler = NULL;
+}
 
-    static void torpedoHandler(CollidibleObject* obj) {  /* (label trc) */
-        if (--obj->counter < 0) {
-            // time fuse
-            obj->counter = 2;
-            obj->handler = explosionHandler;
-            obj->collidible = false;
-        }
-        else {  /* (label t1c) */
-            obj->dy += obj->x / (512 * (1 << torpedoSpaceWarpage));
-            obj->y += obj->dy / 8;
-            obj->dx += obj->y / (512 * (1 << torpedoSpaceWarpage));
-            obj->x += obj->dx / 8;
-            toroidalize(*obj);
-            plot(obj->x, obj->y, 1);
-        }
-    }
-
-    static void hyperspaceHandler(CollidibleObject* obj) {
-        // "this routine handles a non-colliding ship invisibly in hyperspace"
-        if (--obj->counter == 0) { // spend time in hyperspace ...
-             // zero, set up next step
-             obj->handler = hyperspaceHandler2;
-             // this.size = 7; // not used here
-             // set up displacement
-             obj->x += (Random() * 2 - 1) * (1 << hyperspaceDisplacement);
-             obj->y += (Random() * 2 - 1) * (1 << hyperspaceDisplacement);
-             toroidalize(*obj); // maintain toroidal space (not in original)
-             // add induced velocity
-             obj->dx += (Random() * 2 - 1) * (1 << hyperspaceInducedVelocity);
-             obj->dy += (Random() * 2 - 1) * (1 << hyperspaceInducedVelocity);
-             // set up a random rotation
-             ((Spaceship*)obj)->theta = TAU * Random();
-             // original adds some instructions to keep it in bounds of 0 .. 2 PI
-             obj->counter = hyperspaceTimeInBreakout;
-        }
-    }
-
-    static void hyperspaceHandler2(CollidibleObject* obj1) {
-		Spaceship* obj = (Spaceship*)obj1;
-        // "this routine handles a ship breaking out of hyperspace"
-        if (--obj->counter > 0) {
-            // spend time in breakout, display a blip
-            plot(obj->x, obj->y, 2);
-        }
-        else {
-            // zero, now check, restore spaceship handler
-            obj->handler = obj->hyp1;
-            obj->collidible = true;
-            obj->size = 1024;
-            if (obj->hyp2 > 0) obj->hyp2--; // decrement remaining jumps
-            obj->hyp3 = hyperspaceRechargeTime;
-            // now check, if we break on re-entry (Mark One Hyperfield Generators ...)
-            obj->hyp4 += hyperspcaceUncertancy;
-            int r = ((int)(Random() * (1 << 20)) | 0) & 0x1FFFF; // 17-bits random
-            if (obj->hyp4 >= r) { // explode
-                obj->handler = explosionHandler;
-                obj->collidible = false;
-                obj->counter = 10;
-            }
-        }
-    }
-
-    // outline compiler, returns anonymous function
-    // variables are rather passed to the resulting function as arguments than shared as globals
-    // when called: f(sx1, sy1, ssn, scn, ssm, ssc, ssd, csn, csm, scm)
-    // generated function returns object { "x": x, "y": y },
-    // where x, y are the coors of the last plot position to be used for sx1 and sy1 respectively.
-
-	static void comtab(int& x, int& y, int a, int b) {
-		x += a;
-		y += b;
-		plot(x, y, 0);
+static void torpedoHandler(CollidibleObject* obj) {  /* (label trc) */
+	if (--obj->counter < 0) {
+		// time fuse
+		obj->counter = 2;
+		obj->handler = explosionHandler;
+		obj->collidible = false;
 	}
+	else {  /* (label t1c) */
+		obj->dy += obj->x / (512 * (1 << torpedoSpaceWarpage));
+		obj->y += obj->dy / 8;
+		obj->dx += obj->y / (512 * (1 << torpedoSpaceWarpage));
+		obj->x += obj->dx / 8;
+		toroidalize(*obj);
+		plot(obj->x, obj->y, 1);
+	}
+}
 
-	template<const int oc[48]> static Point compileOutline (
+static void hyperspaceHandler2(CollidibleObject* obj1) {
+	Spaceship* obj = (Spaceship*)obj1;
+	// "this routine handles a ship breaking out of hyperspace"
+	if (--obj->counter > 0) {
+		// spend time in breakout, display a blip
+		plot(obj->x, obj->y, 2);
+	}
+	else {
+		// zero, now check, restore spaceship handler
+		obj->handler = obj->hyp1;
+		obj->collidible = true;
+		obj->size = 1024;
+		if (obj->hyp2 > 0) obj->hyp2--; // decrement remaining jumps
+		obj->hyp3 = hyperspaceRechargeTime;
+		// now check, if we break on re-entry (Mark One Hyperfield Generators ...)
+		obj->hyp4 += hyperspcaceUncertancy;
+		int r = ((int)(Random() * (1 << 20)) | 0) & 0x1FFFF; // 17-bits random
+		if (obj->hyp4 >= r) { // explode
+			obj->handler = explosionHandler;
+			obj->collidible = false;
+			obj->counter = 10;
+		}
+	}
+}
+
+static void hyperspaceHandler(CollidibleObject* obj) {
+	// "this routine handles a non-colliding ship invisibly in hyperspace"
+	if (--obj->counter == 0) { // spend time in hyperspace ...
+		// zero, set up next step
+		obj->handler = hyperspaceHandler2;
+		// this.size = 7; // not used here
+		// set up displacement
+		obj->x += (Random() * 2 - 1) * (1 << hyperspaceDisplacement);
+		obj->y += (Random() * 2 - 1) * (1 << hyperspaceDisplacement);
+		toroidalize(*obj); // maintain toroidal space (not in original)
+		// add induced velocity
+		obj->dx += (Random() * 2 - 1) * (1 << hyperspaceInducedVelocity);
+		obj->dy += (Random() * 2 - 1) * (1 << hyperspaceInducedVelocity);
+		// set up a random rotation
+		((Spaceship*)obj)->theta = TAU * Random();
+		// original adds some instructions to keep it in bounds of 0 .. 2 PI
+		obj->counter = hyperspaceTimeInBreakout;
+	}
+}
+
+static constexpr double angularAcceleration =     8 * BIN_RAD_COEF;  // maa     010  (turn, PI: 0144420)
+static void spaceshipHandler(CollidibleObject* co) {  /* (label sr0) */
+	Spaceship* ship = (Spaceship*)co;
+	double am, Sin, Cos, bx, by, t1, t2, ssn, scn, sx1, sy1, stx, sty, ssm,
+		   ssc, ssd, scm, csn, src, csm;
+	int	m, f, thrusting = false;
+	Point p;
+	CollidibleObject* torp;
+	// rotation
+	am = ship->angularMomentum;
+	if (ship->ctrl & LEFT)  am += angularAcceleration;
+	if (ship->ctrl & RIGHT) am -= angularAcceleration;
+	if (Options.ANGULARMOMENTUM) {
+		ship->angularMomentum = am;
+	}
+	else {
+		ship->angularMomentum = 0;
+		am *= 128; // 1<<7
+	}
+	ship->theta += am;
+	// limit to +/- 2*PI
+	if (ship->theta > TAU) {
+		ship->theta -= TAU;
+	}
+	else if (ship->theta < -TAU) {
+		ship->theta += TAU;
+	}
+	Sin = sin(ship->theta);
+	bx = by = 0;
+	// gravity computations
+	if (!Options.SUNOFF) {
+		t1 = ship->x / 8;
+		t2 = ship->y / 8;
+		t1 = t1 * t1 + t2 * t2;
+		if (t1 < starCaptureRadius) { // in sun (label pof)
+			ship->dx = ship->dy = 0;
+			if (Options.SUNKILLS) { // explode (label po1)
+				ship->handler = explosionHandler;
+				ship->collidible = false;
+				ship->counter = 8;
+			}
+			else { // set ship to "anti pode"
+				ship->x = ship->y = COORS_MAX;
+			}
+			return;
+		}
+		t1 = (sqrt(t1) * t1) / 2;
+		if (!Options.LOWGRAVITY) t1 /= 4;
+		bx = -ship->x / t1;
+		by = -ship->y / t1;
+	}
+	// ... and back to business ...
+	Cos = cos(ship->theta);
+	// rockets fired?
+	if ((ship->ctrl & THRUST) && ship->fuel) {
+		f = 1 << spaceshipAcceleration; // use div instead of right shift
+		by += Cos / f;
+		bx -= Sin / f;
+		thrusting = true;
+	}
+	// update positions
+	ship->dy += by;
+	ship->y  += ship->dy / 8;
+	ship->dx += bx;
+	ship->x  += ship->dx / 8;
+	toroidalize(*ship);
+	// half a ship's length
+	ssn = Sin * 16;
+	scn = Cos * 16;
+	// outline start pos (stern, ahead of center)
+	sx1 = ship->x - ssn;
+	sy1 = ship->y + scn;
+	// torpedoes will show up here
+	stx = sx1 - ssn;
+	sty = sy1 + scn;
+	// draw the ship and update drawing pos to end of outline
+	ssn = Sin;
+	scn = Cos;
+	ssm = ssn;
+	ssc = ssn + scn;
+	ssd = ssc;
+	csn = ssn - scn;
+	csm = -csn;
+	scm = scn;
+	p = ship->outline(sx1, sy1, ssn, scn, ssm, ssc, ssd, csn, csm, scm);
+	sx1 = p.x;
+	sy1 = p.y;
+	// draw exhausts
+	if (thrusting) {
+		src = floor(Random() * 16);
+		ssn = Sin * 2;
+		scn = Cos * 2;
+		// fuel consumption is a function of the blast's length!
+		while (ship->fuel > 0 && --src > 1) {
+			ship->fuel--;
+			sx1 += ssn;
+			sy1 -= scn;
+			plot (sx1, sy1, 0);
+		}
+	}
+	if (ship->counter > 0) { // torpedo cooling
+		ship->counter--;
+	}
+	else if ( // fire, no single-shot-lock, and torpedoes left?
+			(ship->ctrl & FIRE)
+			&& (!Options.SINGLESHOTS || !(ship->lastCtrl & FIRE))
+			&& ship->torpedoes
+			) {
+		ship->torpedoes--;
+		// find empty object and set up the torpedo
+		for (m = 2; m < nob; m++) {
+			if (!mtb[m]->handler) {
+				torp = mtb[m];
+				torp->handler = torpedoHandler;
+				torp->collidible = true;
+				torp->x = stx;
+				torp->y = sty;
+				f = 1 << torpedoVelocity; // use div instead of right shift
+				torp->dx = ship->dx - Sin * 512 / f;
+				torp->dy = ship->dy + Cos * 512 / f;
+				torp->size = 16;
+				torp->counter = torpedoLife;
+				ship->counter = torpedoReloadTime;
+				break;
+			}
+		}
+	}
+	// hyperspace
+	if (ship->hyp3 > 0) { // cooling
+		ship->hyp3--;
+	}
+	else if (ship->hyp2 > 0) { // jumps remaining?
+		// are controls for left and right set and was neither of them set before?
+		// (last condition is thought to inhibit accidental jumps.
+		//  ignored in original, since the last control word is never saved,
+		//  works out as "if (this.ctrl) & Controls.HYPERSPACE)".)
+		if ((((~ship->ctrl) | ship->lastCtrl) & HYPERSPACE) == 0) {
+			ship->hyp1 = ship->handler;
+			ship->handler = hyperspaceHandler;
+			ship->collidible = false;
+			ship->counter = hyperspaceTimeBeforeBreakout;
+			// this.size = 3; // not used here
+		}
+	}
+	// store last control word (missing in original)
+	ship->lastCtrl = ship->ctrl;
+}
+
+// optional UI notifications
+
+static void displayScores() {
+	SpacewarUI.showScores(score1, score2);
+}
+
+static void haltSignal() {
+	SpacewarUI.halted();
+}
+
+// notify any external UI to check gamepads (on the entry of each frame).
+// the UI is expected to set any readings via Spacewar.setControls().
+
+static void readGamepads() {
+	SpacewarUI.readGamepads();
+}
+
+// outline compiler, returns anonymous function
+// variables are rather passed to the resulting function as arguments than shared as globals
+// when called: f(sx1, sy1, ssn, scn, ssm, ssc, ssd, csn, csm, scm)
+// generated function returns object { "x": x, "y": y },
+// where x, y are the coors of the last plot position to be used for sx1 and sy1 respectively.
+
+template<const int oc[48]> static Point compileOutline (
 		double sx1, double sy1, double ssn, double scn, double ssm, double ssc,
 		double ssd, double csn, double csm, double scm)
-	{
-        // (lable oc => properties 'not', 'not+1')
-        int pass1 = true,
-            mark = false,
-            i = 0,
-            max = 48,
-            mx, my, t;
-        double x = sx1,
-            y = sy1;
+{
+	// (lable oc => properties 'not', 'not+1')
+	int pass1 = true,
+		mark = false,
+		i = 0,
+		max = 48,
+		mx, my, t;
+	double x = sx1,
+		   y = sy1;
 
-        while (i < max) {
-            switch (oc[i++]) {
-                case 0: // fall through
-                case 1:    // down
-                    x += ssn;
-                    y -= scn;
-                    plot(x, y, 0);
-                    break;
-                case 2:  // right
-                    x += scm;
-                    y += ssm;
-                    plot(x, y, 0);
-                    break;
-                case 3:    // down right
-                    x += ssc;
-                    y -= csm;
-                    plot(x, y, 0);
-                    break;
-                case 4: // left
-                    x -= scm;
-                    y -= ssm;
-                    plot(x, y, 0);
-                    break;
-                case 5:    // down left
-                    x += csn;
-                    y -= ssd;
-                    plot(x, y, 0);
-                    break;
-                case 6: // store/restore position
-                    if (mark) {
-                        x = mx;
-                        y = my;
-                    }
-                    else {
-                        mx = x;
-                        my = y;
-                    }
-                    mark = !mark;
-                    break;
-                case 7: // mirror / return
-                    if (pass1) {
-                        // flip matrix horizontally
-                        scm = -scm;
-                        ssm = -ssm;
-                        t = csm;
-                        csm = ssd;
-                        ssd = t;
-                        t = ssc;
-                        ssc = csn;
-                        csn = t;
-                        // start over
-                        i = 0;
-                        x = sx1;
-                        y = sy1;
-                        pass1 = false;
-                        mark = false; // fix any orphaned codes 6 (not in original)
-                    }
-                    else {
-                        // return last plotting position
-                        return {
-                            x,
-                            y
-                        };
-                    }
-                    break;
-            }
-        }
-        // failsafe return -- not in original, we should have returned at code 7 before!
-        return {
-            x,
-            y
-        };
-    }
+	while (i < max) {
+		switch (oc[i++]) {
+			case 0: // fall through
+			case 1:    // down
+				x += ssn;
+				y -= scn;
+				plot(x, y, 0);
+				break;
+			case 2:  // right
+				x += scm;
+				y += ssm;
+				plot(x, y, 0);
+				break;
+			case 3:    // down right
+				x += ssc;
+				y -= csm;
+				plot(x, y, 0);
+				break;
+			case 4: // left
+				x -= scm;
+				y -= ssm;
+				plot(x, y, 0);
+				break;
+			case 5:    // down left
+				x += csn;
+				y -= ssd;
+				plot(x, y, 0);
+				break;
+			case 6: // store/restore position
+				if (mark) {
+					x = mx;
+					y = my;
+				}
+				else {
+					mx = x;
+					my = y;
+				}
+				mark = !mark;
+				break;
+			case 7: // mirror / return
+				if (pass1) {
+					// flip matrix horizontally
+					scm = -scm;
+					ssm = -ssm;
+					t = csm;
+					csm = ssd;
+					ssd = t;
+					t = ssc;
+					ssc = csn;
+					csn = t;
+					// start over
+					i = 0;
+					x = sx1;
+					y = sy1;
+					pass1 = false;
+					mark = false; // fix any orphaned codes 6 (not in original)
+				}
+				else {
+					// return last plotting position
+					return {
+						x,
+							y
+					};
+				}
+				break;
+		}
+	}
+	// failsafe return -- not in original, we should have returned at code 7 before!
+	return {
+		x,
+			y
+	};
+}
 
-    // draw the gravitational star
+static void newGame() {  /* (label a40) */
+	int i;
+	Spaceship* ss1;
+	Spaceship* ss2;
 
-    static void starp(double& x, double& y, double bx, double by) {
-        x += bx;
-        y += by;
-        plot(x, y, 0);
-    }
+	ss1 = new Spaceship();
+	ss2 = new Spaceship();
 
-    static void drawHeavyStar() { // (label blp)
-        double x = 0,
-            y = 0,
-            bx = Random() * 2 -1,
-            by = Random() * 2 -1,
-            l = 16 - floor(Random()*8);
-        int i;
+	// clear and init table of objects (label a2)
+	for(auto i: mtb)
+		delete i;
+	mtb.clear();
+	mtb.push_back(ss1);
+	mtb.push_back(ss2);
+	for (i = 2; i < nob; i++) mtb.push_back( new CollidibleObject() );
 
-        plot(x, y, 0);
-        for (i = 0; i < l; i++) starp(x, y, bx, by);
-        x = -x;
-        y = -y;
-        for (i = 0; i < l; i++) starp(x, y, bx, by);
-    }
+	// setup spaceships (label a2, a3)
+	ss1->handler = spaceshipHandler;
+	ss1->collidible = true;
+	ss2->handler = spaceshipHandler;
+	ss2->collidible = true;
+	ss1->x =  QUADRANT;
+	ss1->y =  QUADRANT;
+	ss2->x = -QUADRANT;
+	ss2->y = -QUADRANT;
+	ss1->theta = M_PI;
+	ss2->theta = 0;
+	ss1->outline = compileOutline<outline1>;
+	ss2->outline = compileOutline<outline2>;
+	ss1->torpedoes = ss2->torpedoes = torpedoSupply;
+	ss1->fuel = ss2->fuel = fuelSupply;
+	ss1->hyp2 = ss2->hyp2 = hyperspaceShots;
+	// explosion size will be derived from this (orig: instruction count)
+	ss1->size = ss2->size = 1024;
+}
+
+// draw the gravitational star
+
+static void starp(double& x, double& y, double bx, double by) {
+	x += bx;
+	y += by;
+	plot(x, y, 0);
+}
+
+static void drawHeavyStar() { // (label blp)
+	double x = 0,
+		   y = 0,
+		   bx = Random() * 2 -1,
+		   by = Random() * 2 -1,
+		   l = 16 - floor(Random()*8);
+	int i;
+
+	plot(x, y, 0);
+	for (i = 0; i < l; i++) starp(x, y, bx, by);
+	x = -x;
+	y = -y;
+	for (i = 0; i < l; i++) starp(x, y, bx, by);
+}
 
 
 
-    /* ====== implementation specific glue ====== */
 
-    // optional UI notifications
+static void mainLoop() {  /* (label ml0, ml1) */
+	CollidibleObject* obj1;
+	CollidibleObject* obj2;
+	int	nnn = nob - 1;
+	// loop over objects
+	for (int i = 0; i < nnn; i++) {
+		obj1 = mtb[i];
+		// is it active?
+		if (obj1->handler) {
+			// can it colide?
+			if (obj1->collidible) {
+				// comparison loop
+				for (int j = i + 1; j < nob; j++) {
+					obj2 = mtb[j];
+					// collidible?
+					if (obj2->collidible) {
+						double dx = fabs(obj1->x - obj2->x);
+						if (dx  < collisionRadius) {
+							double dy = fabs(obj1->y - obj2->y);
+							if (dy < collisionRadius && dx + dy < collisionRadius2) {
+								// explode
+								obj1->handler = obj2->handler = explosionHandler;
+								obj1->collidible = obj2->collidible = false;
+								// set up explosion time & size
+								obj1->counter = obj2->counter = (obj1->size + obj2->size - 1) >> 8;
+							}
+						}
+					}
+				}
+			}
+			// call the object's method
+			obj1->handler(obj1);
+		}
+	}
+	// handle last object, if any
+	obj1 = mtb[nnn];
+	if (obj1->handler) obj1->handler(obj1);
 
-    static void displayScores() {
-        SpacewarUI.showScores(score1, score2);
-    }
+	if (!Options.NOBACKGROUND)
+		ExpensivePlanetarium.update(); // background stars
+	if (!Options.SUNOFF)
+		drawHeavyStar();    // gravtational star ("sun")
+}
 
-    static void haltSignal() {
-        SpacewarUI.halted();
-    }
+static void frame() {  /* (label a) */
+	Spaceship* ss1;
+	Spaceship* ss2;
+	int thriving1, thriving2, endOfMatch = false;
+	if (!halted) {
 
-    // notify any external UI to check gamepads (on the entry of each frame).
-    // the UI is expected to set any readings via Spacewar.setControls().
+		// end of game and restart checks, executed at start of each frame
+		// (these were external patches in version 2b)
+		if (restartCounter == 0) {  /* (label a6) */
+			// here after halt (scores display) or at first run
+			if ((testword & 32) == 0) {
+				// clear scores on testword bit 5 zero
+				score1 = score2 = 0;
+				displayScores(); // notify UI, if found
+				// read new number of games for match play (0 .. 31)
+				gameCounter = (testword >> 6) & 31;
+			}
+			newGame();
+		}
+		// check, if ships are alive and have any torpedoes left
+		ss1 = (Spaceship*)mtb[0];
+		ss2 = (Spaceship*)mtb[1];
+		thriving1 = (ss1->handler == spaceshipHandler);
+		thriving2 = (ss2->handler == spaceshipHandler);
+		if (thriving1 && thriving2
+				&& (ss1->torpedoes > 0 || ss2->torpedoes > 0)) {
+			// reset restart-counter
+			restartCounter = 2 * torpedoLife;
+		}
+		else if (--restartCounter == 0) { // count down to scoring
+			// count-down reached: whoever is still alive is awarded a score
+			if (thriving1) score1 = (score1 + 1) % 0x3FFFF; // 18 bit overflow
+			if (thriving2) score2 = (score2 + 1) % 0x3FFFF;
+			displayScores(); // display scores anyway (original see below)
+			// check match-play
+			if (gameCounter > 0) {
+				if (--gameCounter == 0) { // count down
+					// end of a match
+					if (score1 == score2) {
+						// it's a tie, one more game
+						gameCounter = 1;
+					}
+					else {
+						endOfMatch = true;
+					}
+				}
+			}
+			// halt (to show scores), if match over or bit 5 in testword set,
+			// else start over
+			if (endOfMatch || (testword & 32)) {
+				// original puts score 1 into AC and score 2 in IO and halts
+				// displayScores();
+				if (Options.HALTONSCORES) {
+					halted = true;
+					haltSignal(); // notify UI, if found
+				}
+				return; // we'll resume at the top, since restartCounter is still zero
+			}
+			else {
+				// no special case, restart the game
+				newGame();
+				restartCounter = 1; // not in original (fix resume-after-halt logic)
+			}
+		}
 
-    static void readGamepads() {
-        SpacewarUI.readGamepads();
-    }
+		// finally advance to the main loop ...
+		// (in the original program input is read at the start of each spaceship handler)
+		// read special input (normally expected to be set by 'Spacewar.setControls()')
+		if (Options.TESTWORDCONTROLS) {
+			// map testword bits to spaceship controls
+			((Spaceship*)mtb[0])->ctrl = (testword >> 14) & 15;
+			((Spaceship*)mtb[1])->ctrl = testword & 15;
+		}
+		readGamepads();
+		mainLoop();
+	}
+	CRT.update(); // external UI, not in original
+}
 
-    // some sane setters for external use
+// main -- start a game
+void Spacewar::run(char* options[])
+{
+	// initialize any sense switch flags (optional)
+	// e.g., Spacewar.run( { SUNKILLS: true } );
+	//for (int k = 0; options[k]; k++) setOption(k, options[k]);
 
-    /*
-      setter for sense switch settings
-      e.g., Spacewar.setOption( 'ANGULARMOMENTUM', true )
-      or    Spacewar.setOption( 'SenseSwitch 1', true )
-    */
-    void setOption(std::string key, int value) {
-		//std::string k = key.toUpperCase().replace(/[^A-Z1-6]/g, '');
-		if (key == "SENSESWITCH1")
-            Options.ANGULARMOMENTUM = value;
-		else if (key == "SENSESWITCH2")
-            Options.LOWGRAVITY = value;
-		else if (key == "SENSESWITCH3")
-            Options.SINGLESHOTS = value;
-		else if (key == "SENSESWITCH4")
-            Options.NOBACKGROUND = value;
-		else if (key == "SENSESWITCH5")
-            Options.SUNKILLS = value;
-		else if (key == "SENSESWITCH6")
-            Options.SUNOFF = value;
-		else if (key == "FPS")
-            setFPS(value);
-        else
-            Options[key] = value;
-    }
+	// start the game
+	ExpensivePlanetarium.reset();
+	restartCounter = 0;
+	frame();
+	if (timer) clearInterval(timer);
+	timer = setInterval(frame, floor(1000 / Options.FPS));
+}
 
-    /*
-      getter for Options
-    */
-    int getOption(std::string key) {
-		//std::string k = String(key).toUpperCase().replace(/[^A-Z1-6]/g, "");
-        if (key == "SENSESWITCH1") return Options.ANGULARMOMENTUM ;
-        else if (key == "SENSESWITCH2") return Options.LOWGRAVITY;
-    	else if (key == "SENSESWITCH3") return Options.SINGLESHOTS;
-        else if (key == "SENSESWITCH4") return Options.NOBACKGROUND;
-    	else if (key == "SENSESWITCH5") return Options.SUNKILLS;
-        else if (key == "SENSESWITCH6") return Options.SUNOFF;
-    	else if (key == "FPS") return Options.FPS;
-    	else return Options[key];
-    }
+static constexpr bool legalInputs[] = { false, true, true, false, true, false, false, false, true, false, false, false, true, false, false, true };
+/*
+   setter for spaceship control input
+   Spacewar.setControls( 0, FIRE, true )
+   reset state by Spacewar.setControls( 0, RESET )
+   or    Spacewar.setControls( 0, ALL, false )
+*/
+void Spacewar::setControls(int spaceship, int key, int value)
+{
+	if (mtb.empty()) return; // not started, yet: ignore
+	// sanitize input
+	int s = spaceship | 0;
+	if (s < 0 || s > 1) return;
+	int b = key | 0;
+	if (!legalInputs[b]) return;
 
-    /*
-      setter for testword
-    */
-    void setTestword(unsigned int n) {
-        testword = n & 0x3FFFF;
-    }
+	// finally, manipulate the bit-vector in property 'ctrl'
+	Spaceship* obj = (Spaceship*)mtb[s];
+	obj->ctrl = ( (value)? obj->ctrl | b : obj->ctrl & (~b) ) & ALL;
+}
 
-    /*
-        getter for testword
-    */
-    unsigned int getTestword() {
-        return testword;
-    }
 
-    /*
-      setter for FPS, called by "setOption('FPF', <value>)" internally
-    */
-    void setFPS(float fps) {
-        if (!std::isnan(fps) && fps > 0 && fps <= 100) {
-            Options.FPS = fps;
-            if (timer) {
-                clearInterval(timer);
-                timer = setInterval(frame, floor(1000/fps));
-            }
-        }
-    }
+// ship outline codes
 
-    /*
-        getter for FPS
-    */
-    float getFPS() {
-        return Options.FPS;
-    }
+/*
+   the screen is represented internally like the DEC type 30 display:
+   1048 x 1048 at 7 intensities, origin at the center.
+   while the original uses a fixed point format (fx10.18) for positions,
+   floats are used in the JS implementation.
+   intensities are 3 bit values, one's complement (+3 .. -3).
+   higher intensities also cause bigger spot-sizes (blips).
+   the original display is a point plotted device (animated display),
+   meaning there's no memory or frame buffer: blips will be activated
+   and fade away (in the afterglow of the Type 30 CRT's P7 phospor).
 
-    /*
-        getter for scores, returns array [<score-ss1>, <score-ss2>]
-    */
-    struct Scores {int s1; int s2;};
-	Scores getScores() {
-        return {score1, score2};
-    }
+   co-ordinates are as in the PDP-1 with positive axis up and right:
 
-    /*
-        clear/reset scores
-    */
-    void resetScores() {
-        score1 = score2 = 0;
-        displayScores();
-    }
+                 +512
 
-    /*
-        halt execution
-    */
-    void halt() {
-        if (timer) halted = true;
-    }
+      -511        0/0         +512
 
-    /*
-        resume from halt
-    */
-    void resume() {
-        halted = false;
-    }
+                 -511
+*/
 
-};
+
+/*
+   The testword (var testword) represents the state of an array of switches at
+   the operator's console for 18-bit input.
+   If Options.TESTWORDCONTROLS is set, input propagates to spaceship controls
+   as follows: "high order 4 bits, rotate ccw, rotate cw, (both mean hyperspace)
+   fire rocket, and fire torpedo. Low order 4 bits, same for other ship."
+   -- player 1: bits 17 .. 14 (left, right, thrust, fire)
+   -- player 2: bits  3 .. 0  (left, right, thrust, fire)
+
+   bits 5 .. 10 are related to scoring (bits 6 .. 10: number of games per match)
+
+   bits:         17 16 15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+   usage:         -PLAYER 1-          GAMES P. MATCH SC     -PLAYER 2-
+   semantics:     L  R  T  F          16  8  4  2  1        L  R  T  F
+                  |  |                => 0..31 GAMES        |  |
+               HYPERSPACE                                HYPERSPACE
+
+   SC: Show scores in single game mode or after the next game in match mode.
+   (Here, scores will be displayed anyway.) If cleared, when resumed from a
+   halt for the score display, scores are reset.
+*/
+
+
+// constructors (symbols/pointers of the original program in parentheses)
+
+
+
+/* ====== implementation specific glue ====== */
+
+// some sane setters for external use
+
+/*
+   setter for FPS, called by "setOption('FPF', <value>)" internally
+   */
+void setFPS(float fps) {
+	if (!std::isnan(fps) && fps > 0 && fps <= 100) {
+		Options.FPS = fps;
+		if (timer) {
+			clearInterval(timer);
+			timer = setInterval(frame, floor(1000/fps));
+		}
+	}
+}
+
+/*
+   getter for FPS
+   */
+float getFPS() {
+	return Options.FPS;
+}
+
+/*
+   setter for sense switch settings
+   e.g., Spacewar.setOption( 'ANGULARMOMENTUM', true )
+   or    Spacewar.setOption( 'SenseSwitch 1', true )
+   */
+void setOption(std::string key, int value) {
+	//std::string k = key.toUpperCase().replace(/[^A-Z1-6]/g, '');
+	if (key == "SENSESWITCH1")
+		Options.ANGULARMOMENTUM = value;
+	else if (key == "SENSESWITCH2")
+		Options.LOWGRAVITY = value;
+	else if (key == "SENSESWITCH3")
+		Options.SINGLESHOTS = value;
+	else if (key == "SENSESWITCH4")
+		Options.NOBACKGROUND = value;
+	else if (key == "SENSESWITCH5")
+		Options.SUNKILLS = value;
+	else if (key == "SENSESWITCH6")
+		Options.SUNOFF = value;
+	else if (key == "FPS")
+		setFPS(value);
+	else
+		Options[key] = value;
+}
+
+/*
+   getter for Options
+   */
+int getOption(std::string key) {
+	//std::string k = String(key).toUpperCase().replace(/[^A-Z1-6]/g, "");
+	if (key == "SENSESWITCH1") return Options.ANGULARMOMENTUM ;
+	else if (key == "SENSESWITCH2") return Options.LOWGRAVITY;
+	else if (key == "SENSESWITCH3") return Options.SINGLESHOTS;
+	else if (key == "SENSESWITCH4") return Options.NOBACKGROUND;
+	else if (key == "SENSESWITCH5") return Options.SUNKILLS;
+	else if (key == "SENSESWITCH6") return Options.SUNOFF;
+	else if (key == "FPS") return Options.FPS;
+	else return Options[key];
+}
+
+/*
+   setter for testword
+   */
+void setTestword(unsigned int n) {
+	testword = n & 0x3FFFF;
+}
+
+/*
+   getter for testword
+   */
+unsigned int getTestword() {
+	return testword;
+}
+
+/*
+   getter for scores, returns array [<score-ss1>, <score-ss2>]
+   */
+struct Scores {int s1; int s2;};
+Scores getScores() {
+	return {score1, score2};
+}
+
+/*
+   clear/reset scores
+   */
+void resetScores() {
+	score1 = score2 = 0;
+	displayScores();
+}
+
+/*
+   halt execution
+   */
+void halt() {
+	if (timer) halted = true;
+}
+
+/*
+   resume from halt
+   */
+void resume() {
+	halted = false;
+}
 
 Spacewar::Spacewar() {
 	score1 = 0;      // score spaceship 1
@@ -999,17 +984,3 @@ Spacewar::Spacewar() {
 	halted = false;
 }
 
-static Spacewar game;
-
-void Start()
-{
-	game.run(NULL);
-}
-
-void SetControls(int ship, int key, int value)
-{
-	game.setControls(ship, key, value);
-}
-
-constexpr bool Spacewar::legalInputs[];
-Planetarium Spacewar::ExpensivePlanetarium;

@@ -15,9 +15,11 @@
 
 #include <stdio.h>
 
-int keys[2][4];
+static int keys[2][4];
+static BView* view;
+static Spacewar game;
 
-BView* view;
+
 
 class SpacewarApp: public BApplication {
 	public:
@@ -41,7 +43,7 @@ class SpacewarApp: public BApplication {
 
 	void ReadyToRun() override
 	{
-		Start();
+		game.run(NULL);
 	}
 
 	void (*callback)();
@@ -158,7 +160,7 @@ void _UI::readGamepads()
 	for (int j = 0; j < 4; j++)
 	{
 		static int lut[] = {LEFT, RIGHT, THRUST, FIRE};
-		SetControls(i, lut[j], keys[i][j]);
+		game.setControls(i, lut[j], keys[i][j]);
 	}
 }
 

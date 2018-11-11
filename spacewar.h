@@ -37,6 +37,12 @@ class _UI {
 void clearInterval(int timer);
 int setInterval(void(callback)(), double delay);
 
-void Start();
-void SetControls(int ship, int key, int value);
+class Spacewar {
+	public:
+		Spacewar();
+
+		void run(char* options[]);
+		void setControls(int spaceship, int key, int value = false);
+};
+
 #endif /* !SPACEWAR_H */

@@ -651,7 +651,7 @@ void Planetarium::update() { /* main method ( label bck ) */
 
 // API methods (exported)
 
-void setOption(std::string key, int v) {
+void Planetarium::setOption(std::string key, int v) {
 	//std::string k = key.toUpperCase().replace("/[^A-Z0-9]/g", '');
 	if (key == "FRAMESKIP")
 		v = !v;
