@@ -189,8 +189,10 @@ int main(void) {
 	view = new SpaceView(BRect(0, 0, size, size));
 
 	BWindow* window = new BWindow(view->Bounds(), "Spacewar!",
-		B_TITLED_WINDOW, B_QUIT_ON_WINDOW_CLOSE | B_NOT_RESIZABLE, 0);
+		B_TITLED_WINDOW,
+		B_QUIT_ON_WINDOW_CLOSE | B_NOT_RESIZABLE | B_NOT_ZOOMABLE, 0);
 	window->AddChild(view);
+	window->SetLook(window_look(25));
 	window->CenterOnScreen();
 	view->MakeFocus();
 	window->Show();
