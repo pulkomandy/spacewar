@@ -62,36 +62,46 @@ class SpaceView: public BView {
 			SetScale((Bounds().Width() + 1) / 1024);
 		}
 
-		void Key(char key, bool pressed)
+		void Key(char, bool pressed)
 		{
+			BMessage* message = Looper()->CurrentMessage();
+			int32 key = message->FindInt32("key");
 			switch(key) {
-				case 'q':
+				case 0x3C:
 					keys[0][0] = pressed;
 					break;
-				case 'd':
+				case 0x3E:
 					keys[0][1] = pressed;
 					break;
-				case 'z':
+				case 0x28:
 					keys[0][2] = pressed;
 					break;
-				case 's':
+				case 0x3D:
 					keys[0][3] = pressed;
 					break;
 
-				case 'k':
+				case 0x44:
+				case 0x61:
+				case 0x48:
 					keys[1][0] = pressed;
 					break;
-				case 'm':
+				case 0x46:
+				case 0x63:
+				case 0x4A:
 					keys[1][1] = pressed;
 					break;
-				case 'o':
+				case 0x30:
+				case 0x57:
+				case 0x38:
 					keys[1][2] = pressed;
 					break;
-				case 'l':
+				case 0x45:
+				case 0x62:
+				case 0x49:
 					keys[1][3] = pressed;
 					break;
 
-				case B_ESCAPE:
+				case 0x01:
 					Window()->PostMessage(B_QUIT_REQUESTED);
 					break;
 			}
