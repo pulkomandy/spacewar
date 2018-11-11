@@ -5,6 +5,7 @@
 class CollidibleObject {
 	public:
 		CollidibleObject();
+		void toroidalize();
 
 		bool collidible;
 		double x,y;
@@ -13,5 +14,9 @@ class CollidibleObject {
 		int size;
 		int counter;
 };
+
+// display constants (for readability)
+static const int SCREENWIDTH = 1024,
+    COORS_MAX = SCREENWIDTH/2;
 
 #endif /* !COLLIDIBLE_H */

@@ -134,10 +134,7 @@ int timer;
 _CRT CRT;
 _UI SpacewarUI;
 
-// display constants (for readability)
-static const int SCREENWIDTH = 1024,
-    COORS_MAX = SCREENWIDTH/2,
-    QUADRANT  = COORS_MAX/2;
+static constexpr int QUADRANT = COORS_MAX/2;
 
 static constexpr double BIN_RAD_COEF = M_PI / 51472;  // PI is 51472 (0144420 oct) in PDP-1
 static constexpr double TAU = M_PI * 2;               // 2 PI
@@ -225,28 +222,12 @@ class Spaceship: public CollidibleObject {
 
 // object handlers, this-object is current object (see mainLoop)
 
-static void toroidalize(CollidibleObject& obj) {
-	// util for toroidal space (in original maintained by word length)
-	if (obj.x <= -COORS_MAX) {
-		obj.x += SCREENWIDTH;
-	}
-	else if (obj.x > COORS_MAX) {
-		obj.x -= SCREENWIDTH;
-	}
-	if (obj.y <= -COORS_MAX) {
-		obj.y += SCREENWIDTH;
-	}
-	else if (obj.y > COORS_MAX) {
-		obj.y -= SCREENWIDTH;
-	}
-}
-
 static void explosionHandler(CollidibleObject* obj) {  /* (label mex) */
 	double x, y;
 	int mxc, f;
 	obj->y += obj->dy / 8;
 	obj->x += obj->dx / 8;
-	toroidalize(*obj);
+	obj->toroidalize();
 	// particles
 	mxc = obj->size >> 3;
 	do {
@@ -286,7 +267,7 @@ static void torpedoHandler(CollidibleObject* obj) {  /* (label trc) */
 		obj->y += obj->dy / 8;
 		obj->dx += obj->y / (512 * (1 << torpedoSpaceWarpage));
 		obj->x += obj->dx / 8;
-		toroidalize(*obj);
+		obj->toroidalize();
 		plot(obj->x, obj->y, 1);
 	}
 }
@@ -325,7 +306,7 @@ static void hyperspaceHandler(CollidibleObject* obj) {
 		// set up displacement
 		obj->x += (Random() * 2 - 1) * (1 << hyperspaceDisplacement);
 		obj->y += (Random() * 2 - 1) * (1 << hyperspaceDisplacement);
-		toroidalize(*obj); // maintain toroidal space (not in original)
+		obj->toroidalize(); // maintain toroidal space (not in original)
 		// add induced velocity
 		obj->dx += (Random() * 2 - 1) * (1 << hyperspaceInducedVelocity);
 		obj->dy += (Random() * 2 - 1) * (1 << hyperspaceInducedVelocity);
@@ -401,7 +382,7 @@ static void spaceshipHandler(CollidibleObject* co) {  /* (label sr0) */
 	ship->y  += ship->dy / 8;
 	ship->dx += bx;
 	ship->x  += ship->dx / 8;
-	toroidalize(*ship);
+	ship->toroidalize();
 	// half a ship's length
 	ssn = Sin * 16;
 	scn = Cos * 16;
