@@ -56,30 +56,9 @@
 #include "spacewar.h"
 
 #include "Collidible.h"
+#include "Spaceship.h"
 #include "Planetarium.h"
 
-// "interesting and often changed constants"
-// (original values in octal, not allowed in JS strict-mode, see comments)
-
-                                                     // sym   value  unit/comment
-                                                     // -------------------------------
-static const int
-	torpedoSupply =                         32,  // tno     040  (number of)
-	torpedoVelocity =                        4,  // tvl  sar 4s  (right shift)
- 	torpedoReloadTime =                     16,  // rlt     020  (frames)
-	torpedoLife =                           96,  // tlf    0140  (frames)
-	fuelSupply =                          8192,  // foo  020000  (per exhaust blip)
-	spaceshipAcceleration =                  4,  // sac  sar 4s  (right shift)
-	starCaptureRadius =                      1,  // str      01  (greater zero)
-	collisionRadius =                       48,  // me1   06000  (screen coors)
-	collisionRadius2 =                      24,  // me2   03000  (above/2)
-	hyperspaceShots =                        8,  // mhs     010  (number of)
-	hyperspaceTimeBeforeBreakout =          32,  // hd1     040  (frames)
-	hyperspaceTimeInBreakout =              64,  // hd2    0100  (frames)
-	hyperspaceRechargeTime =               128,  // hd3    0200  (frames)
-	hyperspaceDisplacement =                 9,  // hr1  scl 9s  (left shift)
-	hyperspaceInducedVelocity =              4,  // hr2  scl 4s  (left shift)
-	hyperspcaceUncertancy =              16384;  // hur  040000  (threshold bonus)
 
 // game settings
 
@@ -180,60 +159,48 @@ static unsigned int testword;
 
 static Planetarium ExpensivePlanetarium;
 
-struct Point {double x; double y;};
-typedef Point (*Outline)(double, double, double, double, double, double, double, double, double, double);
-class Spaceship: public CollidibleObject {
-	public:
-		Spaceship() 
-			: CollidibleObject()
-			, outline(NULL)
-		{
-			// For initial alloc of mtb
-		}
-		Spaceship(double x, double y, double theta, Outline outline)
-			: CollidibleObject()
-			, outline(outline)
-		{
-			angularMomentum = 0;  //              (symbol: nom, pointer: mom)
-			this->theta = theta;  // rotation                      (nth, mth)
-			fuel = fuelSupply;    // amount of fuel                (nfu, mfu)
-			torpedoes = torpedoSupply; // torpedoes left                (ntr, mtr)
-			outline = NULL;       // outline code                  (not, mot)
-			hyp1 = 0;             // hyperspace: handler backup    (nh1, mh1)
-			hyp2 = hyperspaceShots; // hyperspace jumps remaining    (nh2, mh2)
-			hyp3 = 0;             // hyperspace cooling            (nh3, mh3)
-			hyp4 = 0;             // hyperspace uncertainty        (nh4, mh4)
-			ctrl = 0;             // control input                 (pntr cwg)
-			lastCtrl = 0;         // last control word             (nco, mco)
-
-			collidible = true;
-			handler = (Handler)&Spaceship::spaceshipHandler;
-			// explosion size will be derived from this (orig: instruction count)
-			size = 1024;
-
-			this->x = x;
-			this->y = y;
-		}
-
-		void spaceshipHandler();
-		void hyperspaceHandler();
-		void hyperspaceHandler2();
-
-        double theta;
-		const Outline outline;
-        int torpedoes;
-        int fuel;
-		void(CollidibleObject::*hyp1)(void);
-        int hyp2;
-        int hyp3;
-        int hyp4;
-        int ctrl;
-        double angularMomentum;
-        int lastCtrl;
-};
-
 // Only the first two items will actually be spaceships, so this wastes some space.
 static Spaceship mtb[nob];        // table of objects
+
+Spaceship* Spacewar::spaceship(int idx)
+{
+	return &mtb[idx];
+}
+
+Spaceship::Spaceship()
+	: CollidibleObject()
+	  , outline(NULL)
+{
+	// For initial alloc of mtb
+}
+
+
+Spaceship::Spaceship(double x, double y, double theta, Outline outline, int color)
+	: CollidibleObject()
+	  , outline(outline)
+{
+	angularMomentum = 0;  //              (symbol: nom, pointer: mom)
+	this->theta = theta;  // rotation                      (nth, mth)
+	fuel = fuelSupply;    // amount of fuel                (nfu, mfu)
+	torpedoes = torpedoSupply; // torpedoes left                (ntr, mtr)
+	outline = NULL;       // outline code                  (not, mot)
+	hyp1 = 0;             // hyperspace: handler backup    (nh1, mh1)
+	hyp2 = hyperspaceShots; // hyperspace jumps remaining    (nh2, mh2)
+	hyp3 = 0;             // hyperspace cooling            (nh3, mh3)
+	hyp4 = 0;             // hyperspace uncertainty        (nh4, mh4)
+	ctrl = 0;             // control input                 (pntr cwg)
+	lastCtrl = 0;         // last control word             (nco, mco)
+
+	collidible = true;
+	handler = (Handler)&Spaceship::spaceshipHandler;
+	// explosion size will be derived from this (orig: instruction count)
+	size = 1024;
+
+	this->x = x;
+	this->y = y;
+	this->color = color;
+}
+
 
 // object handlers, this-object is current object (see mainLoop)
 
@@ -241,7 +208,7 @@ void Spaceship::hyperspaceHandler2() {
 	// "this routine handles a ship breaking out of hyperspace"
 	if (--counter > 0) {
 		// spend time in breakout, display a blip
-		plot(x, y, 2);
+		plot(x, y, color | 2);
 	}
 	else {
 		// zero, now check, restore spaceship handler
@@ -364,7 +331,7 @@ void Spaceship::spaceshipHandler() {  /* (label sr0) */
 	csn = ssn - scn;
 	csm = -csn;
 	scm = scn;
-	p = outline(sx1, sy1, ssn, scn, ssm, ssc, ssd, csn, csm, scm);
+	p = outline(sx1, sy1, ssn, scn, ssm, ssc, ssd, csn, csm, scm, color);
 	sx1 = p.x;
 	sy1 = p.y;
 	// draw exhausts
@@ -377,7 +344,7 @@ void Spaceship::spaceshipHandler() {  /* (label sr0) */
 			fuel--;
 			sx1 += ssn;
 			sy1 -= scn;
-			plot (sx1, sy1, 0);
+			plot (sx1, sy1, color);
 		}
 	}
 	if (counter > 0) { // torpedo cooling
@@ -453,7 +420,7 @@ static void readGamepads() {
 
 template<const int oc[48]> static Point compileOutline (
 		double sx1, double sy1, double ssn, double scn, double ssm, double ssc,
-		double ssd, double csn, double csm, double scm)
+		double ssd, double csn, double csm, double scm, int color)
 {
 	// (lable oc => properties 'not', 'not+1')
 	int pass1 = true,
@@ -470,27 +437,27 @@ template<const int oc[48]> static Point compileOutline (
 			case 1:    // down
 				x += ssn;
 				y -= scn;
-				plot(x, y, 0);
+				plot(x, y, color);
 				break;
 			case 2:  // right
 				x += scm;
 				y += ssm;
-				plot(x, y, 0);
+				plot(x, y, color);
 				break;
 			case 3:    // down right
 				x += ssc;
 				y -= csm;
-				plot(x, y, 0);
+				plot(x, y, color);
 				break;
 			case 4: // left
 				x -= scm;
 				y -= ssm;
-				plot(x, y, 0);
+				plot(x, y, color);
 				break;
 			case 5:    // down left
 				x += csn;
 				y -= ssd;
-				plot(x, y, 0);
+				plot(x, y, color);
 				break;
 			case 6: // store/restore position
 				if (mark) {
@@ -523,26 +490,20 @@ template<const int oc[48]> static Point compileOutline (
 				}
 				else {
 					// return last plotting position
-					return {
-						x,
-							y
-					};
+					return { x, y };
 				}
 				break;
 		}
 	}
 	// failsafe return -- not in original, we should have returned at code 7 before!
-	return {
-		x,
-			y
-	};
+	return { x, y };
 }
 
 static void newGame() {  /* (label a40) */
 	int i;
 	// setup spaceships (label a2, a3)
-	new(&mtb[0]) Spaceship(QUADRANT, QUADRANT, M_PI, compileOutline<outline1>);
-	new(&mtb[1]) Spaceship(-QUADRANT, -QUADRANT, 0, compileOutline<outline2>);
+	new(&mtb[0]) Spaceship(QUADRANT, QUADRANT, M_PI, compileOutline<outline1>, 4);
+	new(&mtb[1]) Spaceship(-QUADRANT, -QUADRANT, 0, compileOutline<outline2>, 8);
 
 	// clear and init table of objects (label a2)
 	for (i = 2; i < nob; i++) new(&mtb[i]) CollidibleObject();

@@ -6,11 +6,13 @@
  */
 
 #include "spacewar.h"
+#include "Spaceship.h"
 
 #include <Application.h>
 #include <Joystick.h>
 #include <MessageRunner.h>
 #include <Screen.h>
+#include <String.h>
 #include <View.h>
 #include <Window.h>
 
@@ -21,6 +23,47 @@ static BView* view;
 static Spacewar game;
 
 
+class Hud: public BView {
+	public:
+	Hud(Spaceship* ship);
+
+	void Draw(BRect updateRect) override;
+
+	int fScore;
+	private:
+	Spaceship* fShip;
+};
+
+static Hud* hud[2];
+
+Hud::Hud(Spaceship* ship)
+	: BView(BRect(0, 0, 63, 63), "hud", B_FOLLOW_NONE, B_WILL_DRAW)
+	, fShip(ship)
+{
+	SetViewColor(make_color(0, 0, 0, 255));
+	SetLowColor(make_color(0, 0, 0, 255));
+}
+
+void Hud::Draw(BRect updateRect)
+{
+	BString tmp;
+
+	MovePenTo(2, 12);
+	tmp.SetToFormat("fuel: %d", fShip->fuel);
+	DrawString(tmp);
+	MovePenTo(2, 24);
+	tmp.SetToFormat("torp: %d", fShip->torpedoes);
+	DrawString(tmp);
+	MovePenTo(2, 36);
+	tmp.SetToFormat("jump: %d", fShip->hyp2);
+	DrawString(tmp);
+	MovePenTo(2, 48);
+	tmp.SetToFormat("cool: %d", fShip->hyp3);
+	DrawString(tmp);
+	MovePenTo(2, 60);
+	tmp.SetToFormat("score: %d", fScore);
+	DrawString(tmp);
+}
 
 class SpacewarApp: public BApplication {
 	public:
@@ -126,6 +169,8 @@ void _CRT::update()
 {
 	if (view->LockLooper()) {
 		view->FillRect(BRect(0, 0, 1023, 1023), B_SOLID_LOW);
+		hud[0]->Invalidate();
+		hud[1]->Invalidate();
 		view->UnlockLooper();
 	}
 }
@@ -133,6 +178,12 @@ void _CRT::update()
 void _CRT::plot(double x, double y, int brightness)
 {
 	if (view->LockLooper()) {
+		if (brightness > 3) {
+			view->SetHighColor((brightness & 8) ?
+				make_color(255, 0, 0, 255) : make_color(0, 0, 255, 255));
+			view->SetPenSize((brightness & 3) + 1);
+
+		} else {
 #if 0
 		brightness = brightness * 64 + 63;
 		view->SetHighColor(make_color(255,255, 255, brightness));
@@ -149,6 +200,7 @@ void _CRT::plot(double x, double y, int brightness)
 #endif
 		view->SetHighColor(make_color(255, 255, 255, 255));
 		view->SetPenSize(brightness + 1);
+		}
 
 		view->StrokeLine(BPoint(x, y), BPoint(x, y));
 		view->UnlockLooper();
@@ -157,7 +209,8 @@ void _CRT::plot(double x, double y, int brightness)
 
 void _UI::showScores(int a, int b)
 {
-	printf("Scores %d %d\n", a, b);
+	hud[0]->fScore = a;
+	hud[1]->fScore = b;
 }
 
 void _UI::halted()
@@ -231,10 +284,28 @@ int main(void) {
 
 	view = new SpaceView(BRect(0, 0, size, size));
 
-	BWindow* window = new BWindow(view->Bounds(), "Spacewar!",
+	hud[0] = new Hud(game.spaceship(0));
+	hud[1] = new Hud(game.spaceship(1));
+
+	BRect bounds = view->Bounds();
+
+	hud[0]->MoveTo(bounds.right + 1, bounds.top);
+	hud[0]->ResizeTo(64, bounds.Height() / 2);
+	hud[1]->MoveTo(bounds.right + 1, hud[0]->Bounds().bottom);
+	hud[1]->ResizeTo(64, bounds.Height() / 2);
+
+	hud[0]->SetHighColor(make_color(0, 0, 255, 255));
+	hud[1]->SetHighColor(make_color(255, 0, 0, 255));
+	
+
+	bounds.right += hud[0]->Bounds().Width();
+
+	BWindow* window = new BWindow(bounds, "Spacewar!",
 		B_TITLED_WINDOW,
 		B_QUIT_ON_WINDOW_CLOSE | B_NOT_RESIZABLE | B_NOT_ZOOMABLE, 0);
 	window->AddChild(view);
+	window->AddChild(hud[0]);
+	window->AddChild(hud[1]);
 	window->SetLook(window_look(25));
 	window->CenterOnScreen();
 	view->MakeFocus();
