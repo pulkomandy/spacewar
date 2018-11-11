@@ -55,6 +55,8 @@
 #include <vector>
 
 #include "spacewar.h"
+
+#include "Collidible.h"
 #include "Planetarium.h"
 
 double Random()
@@ -144,26 +146,6 @@ void plot(double x, double y, int b) {
 }
 
 
-	class CollidibleObject {
-		public:
-		CollidibleObject() {
-			handler = NULL;       //              (symbol: mtb, pointer: ml1)
-			collidible = false;   //            (sign-bit in handler address)
-			x = 0;                // pos x                         (nx1, mx1)
-			y = 0;                // pos y                         (ny1, my1)
-			dx = 0;               // delta x                       (ndx, mdx)
-			dy = 0;               // delta y                       (ndy, mdy)
-			counter = 0;          // time of torpedo or explosion  (na1, ma1)
-			size = 0;             // used for explosions           (nb1, mb1)
-		}
-
-		bool collidible;
-		double x,y;
-		double dx,dy;
-		void(*handler)(CollidibleObject*);
-		int size;
-		int counter;
-	};
 std::vector<CollidibleObject*> mtb;        // table of objects
 
 static int score1;      // score spaceship 1
@@ -267,8 +249,6 @@ class Spacewar {
 
                  -511
     */
-
-    // dictionary for controls (exported as property)
 
     static constexpr bool legalInputs[] = { false, true, true, false, true, false, false, false, true, false, false, false, true, false, false, true };
 

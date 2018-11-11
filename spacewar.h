@@ -8,6 +8,7 @@
 #ifndef SPACEWAR_H
 #define SPACEWAR_H
 
+// dictionary for controls (exported as property)
 enum Controls {
 	SPACESHIP1 =  0,
 	SPACESHIP2 =  1,
