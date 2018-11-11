@@ -183,22 +183,32 @@ static unsigned int testword;
 static Planetarium ExpensivePlanetarium;
 
 struct Point {double x; double y;};
+typedef Point (*Outline)(double, double, double, double, double, double, double, double, double, double);
 class Spaceship: public CollidibleObject {
 	public:
-		Spaceship()
+		Spaceship(double x, double y, double theta, Outline outline)
 			: CollidibleObject()
+			, outline(outline)
 		{
 			angularMomentum = 0;  //              (symbol: nom, pointer: mom)
-			theta = 0;            // rotation                      (nth, mth)
-			fuel = 0;             // amount of fuel                (nfu, mfu)
-			torpedoes = 0;        // torpedoes left                (ntr, mtr)
+			this->theta = theta;  // rotation                      (nth, mth)
+			fuel = fuelSupply;    // amount of fuel                (nfu, mfu)
+			torpedoes = torpedoSupply; // torpedoes left                (ntr, mtr)
 			outline = NULL;       // outline code                  (not, mot)
 			hyp1 = 0;             // hyperspace: handler backup    (nh1, mh1)
-			hyp2 = 0;             // hyperspace jumps remaining    (nh2, mh2)
+			hyp2 = hyperspaceShots; // hyperspace jumps remaining    (nh2, mh2)
 			hyp3 = 0;             // hyperspace cooling            (nh3, mh3)
 			hyp4 = 0;             // hyperspace uncertainty        (nh4, mh4)
 			ctrl = 0;             // control input                 (pntr cwg)
 			lastCtrl = 0;         // last control word             (nco, mco)
+
+			collidible = true;
+			handler = (Handler)&Spaceship::spaceshipHandler;
+			// explosion size will be derived from this (orig: instruction count)
+			size = 1024;
+
+			this->x = x;
+			this->y = y;
 		}
 
 		void spaceshipHandler();
@@ -206,7 +216,7 @@ class Spaceship: public CollidibleObject {
 		void hyperspaceHandler2();
 
         double theta;
-        Point (*outline)(double, double, double, double, double, double, double, double, double, double);
+		const Outline outline;
         int torpedoes;
         int fuel;
 		void(CollidibleObject::*hyp1)(void);
@@ -526,8 +536,9 @@ static void newGame() {  /* (label a40) */
 	Spaceship* ss1;
 	Spaceship* ss2;
 
-	ss1 = new Spaceship();
-	ss2 = new Spaceship();
+	// setup spaceships (label a2, a3)
+	ss1 = new Spaceship(QUADRANT, QUADRANT, M_PI, compileOutline<outline1>);
+	ss2 = new Spaceship(-QUADRANT, -QUADRANT, 0, compileOutline<outline2>);
 
 	// clear and init table of objects (label a2)
 	for(auto i: mtb)
@@ -536,25 +547,6 @@ static void newGame() {  /* (label a40) */
 	mtb.push_back(ss1);
 	mtb.push_back(ss2);
 	for (i = 2; i < nob; i++) mtb.push_back( new CollidibleObject() );
-
-	// setup spaceships (label a2, a3)
-	ss1->handler = (CollidibleObject::Handler)&Spaceship::spaceshipHandler;
-	ss1->collidible = true;
-	ss2->handler = (CollidibleObject::Handler)&Spaceship::spaceshipHandler;
-	ss2->collidible = true;
-	ss1->x =  QUADRANT;
-	ss1->y =  QUADRANT;
-	ss2->x = -QUADRANT;
-	ss2->y = -QUADRANT;
-	ss1->theta = M_PI;
-	ss2->theta = 0;
-	ss1->outline = compileOutline<outline1>;
-	ss2->outline = compileOutline<outline2>;
-	ss1->torpedoes = ss2->torpedoes = torpedoSupply;
-	ss1->fuel = ss2->fuel = fuelSupply;
-	ss1->hyp2 = ss2->hyp2 = hyperspaceShots;
-	// explosion size will be derived from this (orig: instruction count)
-	ss1->size = ss2->size = 1024;
 }
 
 // draw the gravitational star
