@@ -52,7 +52,6 @@
 
 #include <math.h>
 #include <string>
-#include <vector>
 
 #include "spacewar.h"
 
@@ -171,7 +170,6 @@ void plot(double x, double y, int b) {
 }
 
 
-std::vector<CollidibleObject*> mtb;        // table of objects
 
 static int score1;      // score spaceship 1
 static int score2;      // score spaceship 2
@@ -186,6 +184,12 @@ struct Point {double x; double y;};
 typedef Point (*Outline)(double, double, double, double, double, double, double, double, double, double);
 class Spaceship: public CollidibleObject {
 	public:
+		Spaceship() 
+			: CollidibleObject()
+			, outline(NULL)
+		{
+			// For initial alloc of mtb
+		}
 		Spaceship(double x, double y, double theta, Outline outline)
 			: CollidibleObject()
 			, outline(outline)
@@ -227,6 +231,9 @@ class Spaceship: public CollidibleObject {
         double angularMomentum;
         int lastCtrl;
 };
+
+// Only the first two items will actually be spaceships, so this wastes some space.
+static Spaceship mtb[nob];        // table of objects
 
 // object handlers, this-object is current object (see mainLoop)
 
@@ -384,8 +391,8 @@ void Spaceship::spaceshipHandler() {  /* (label sr0) */
 		torpedoes--;
 		// find empty object and set up the torpedo
 		for (m = 2; m < nob; m++) {
-			if (!mtb[m]->handler) {
-				torp = mtb[m];
+			if (!mtb[m].handler) {
+				torp = &mtb[m];
 				torp->handler = &Spaceship::torpedoHandler;
 				torp->collidible = true;
 				torp->x = stx;
@@ -533,20 +540,12 @@ template<const int oc[48]> static Point compileOutline (
 
 static void newGame() {  /* (label a40) */
 	int i;
-	Spaceship* ss1;
-	Spaceship* ss2;
-
 	// setup spaceships (label a2, a3)
-	ss1 = new Spaceship(QUADRANT, QUADRANT, M_PI, compileOutline<outline1>);
-	ss2 = new Spaceship(-QUADRANT, -QUADRANT, 0, compileOutline<outline2>);
+	new(&mtb[0]) Spaceship(QUADRANT, QUADRANT, M_PI, compileOutline<outline1>);
+	new(&mtb[1]) Spaceship(-QUADRANT, -QUADRANT, 0, compileOutline<outline2>);
 
 	// clear and init table of objects (label a2)
-	for(auto i: mtb)
-		delete i;
-	mtb.clear();
-	mtb.push_back(ss1);
-	mtb.push_back(ss2);
-	for (i = 2; i < nob; i++) mtb.push_back( new CollidibleObject() );
+	for (i = 2; i < nob; i++) new(&mtb[i]) CollidibleObject();
 }
 
 // draw the gravitational star
@@ -581,14 +580,14 @@ static void mainLoop() {  /* (label ml0, ml1) */
 	int	nnn = nob - 1;
 	// loop over objects
 	for (int i = 0; i < nnn; i++) {
-		obj1 = mtb[i];
+		obj1 = &mtb[i];
 		// is it active?
 		if (obj1->handler) {
 			// can it colide?
 			if (obj1->collidible) {
 				// comparison loop
 				for (int j = i + 1; j < nob; j++) {
-					obj2 = mtb[j];
+					obj2 = &mtb[j];
 					// collidible?
 					if (obj2->collidible) {
 						double dx = fabs(obj1->x - obj2->x);
@@ -610,7 +609,7 @@ static void mainLoop() {  /* (label ml0, ml1) */
 		}
 	}
 	// handle last object, if any
-	obj1 = mtb[nnn];
+	obj1 = &mtb[nnn];
 	if (obj1->handler) (obj1->*obj1->handler)();
 
 	if (!Options.NOBACKGROUND)
@@ -639,8 +638,8 @@ static void frame() {  /* (label a) */
 			newGame();
 		}
 		// check, if ships are alive and have any torpedoes left
-		ss1 = (Spaceship*)mtb[0];
-		ss2 = (Spaceship*)mtb[1];
+		ss1 = (Spaceship*)&mtb[0];
+		ss2 = (Spaceship*)&mtb[1];
 		thriving1 = (ss1->handler == (CollidibleObject::Handler)&Spaceship::spaceshipHandler);
 		thriving2 = (ss2->handler == (CollidibleObject::Handler)&Spaceship::spaceshipHandler);
 		if (thriving1 && thriving2
@@ -689,8 +688,8 @@ static void frame() {  /* (label a) */
 		// read special input (normally expected to be set by 'Spacewar.setControls()')
 		if (Options.TESTWORDCONTROLS) {
 			// map testword bits to spaceship controls
-			((Spaceship*)mtb[0])->ctrl = (testword >> 14) & 15;
-			((Spaceship*)mtb[1])->ctrl = testword & 15;
+			((Spaceship*)&mtb[0])->ctrl = (testword >> 14) & 15;
+			((Spaceship*)&mtb[1])->ctrl = testword & 15;
 		}
 		readGamepads();
 		mainLoop();
@@ -722,7 +721,6 @@ static constexpr bool legalInputs[] = { false, true, true, false, true, false, f
 */
 void Spacewar::setControls(int spaceship, int key, int value)
 {
-	if (mtb.empty()) return; // not started, yet: ignore
 	// sanitize input
 	int s = spaceship | 0;
 	if (s < 0 || s > 1) return;
@@ -730,7 +728,7 @@ void Spacewar::setControls(int spaceship, int key, int value)
 	if (!legalInputs[b]) return;
 
 	// finally, manipulate the bit-vector in property 'ctrl'
-	Spaceship* obj = (Spaceship*)mtb[s];
+	Spaceship* obj = (Spaceship*)&mtb[s];
 	obj->ctrl = ( (value)? obj->ctrl | b : obj->ctrl & (~b) ) & ALL;
 }
 
