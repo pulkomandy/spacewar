@@ -8,6 +8,7 @@
 #include "spacewar.h"
 
 #include <Application.h>
+#include <Joystick.h>
 #include <MessageRunner.h>
 #include <Screen.h>
 #include <View.h>
@@ -164,8 +165,38 @@ void _UI::halted()
 	printf("Halted!\n");
 }
 
+static void Gamepad(BJoystick& gamepad, int player)
+{
+	if (gamepad.CountDevices() <= player)
+		return;
+
+	if (gamepad.Update() != B_OK) {
+		char name[B_OS_NAME_LENGTH];
+		gamepad.RescanDevices();
+		gamepad.GetDeviceName(player, name);
+		gamepad.Open(name, false);
+	} else {
+		keys[player][2] = !gamepad.button1;
+		keys[player][3] = !gamepad.button2;
+
+		keys[player][0] = (gamepad.horizontal < -5);
+		keys[player][1] = (gamepad.horizontal > 5);
+
+		// hyperspace
+		if (gamepad.vertical > 5 || gamepad.vertical < -5)
+			keys[player][0] = keys[player][1] = true;
+	}
+
+}
+
 void _UI::readGamepads()
 {
+	static BJoystick gamepad0;
+	static BJoystick gamepad1;
+
+	Gamepad(gamepad0, 0);
+	Gamepad(gamepad1, 1);
+
 	for (int i = 0; i < 2; i++)
 	for (int j = 0; j < 4; j++)
 	{
