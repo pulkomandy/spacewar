@@ -9,6 +9,7 @@
 
 #include <Application.h>
 #include <MessageRunner.h>
+#include <Screen.h>
 #include <View.h>
 #include <Window.h>
 
@@ -48,15 +49,15 @@ class SpacewarApp: public BApplication {
 
 class SpaceView: public BView {
 	public:
-		SpaceView()
-			: BView(BRect(0, 0, 511, 511), "spacewar", B_FOLLOW_NONE,
+		SpaceView(BRect bounds)
+			: BView(bounds, "spacewar", B_FOLLOW_NONE,
 				B_SUBPIXEL_PRECISE)
 		{
-			SetLowColor(make_color(0, 0, 0, 100));
+			SetLowColor(make_color(0, 0, 0, 64));
 			SetViewColor(make_color(0, 0, 0, 255));
 			SetDrawingMode(B_OP_ALPHA);
 			SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
-			SetScale(0.5);
+			SetScale((Bounds().Width() + 1) / 1024);
 		}
 
 		void Key(char key, bool pressed)
@@ -87,6 +88,10 @@ class SpaceView: public BView {
 				case 'l':
 					keys[1][3] = pressed;
 					break;
+
+				case B_ESCAPE:
+					Window()->PostMessage(B_QUIT_REQUESTED);
+					break;
 			}
 		}
 
@@ -115,8 +120,10 @@ void _CRT::update()
 void _CRT::plot(double x, double y, int brightness)
 {
 	if (view->LockLooper()) {
+#if 0
 		brightness = brightness * 64 + 63;
 		view->SetHighColor(make_color(255,255, 255, brightness));
+#endif
 #if 0
 		rgb_color color;
 		switch (brightness) {
@@ -127,10 +134,8 @@ void _CRT::plot(double x, double y, int brightness)
 		}
 		view->SetHighColor(color);
 #endif
-#if 0
 		view->SetHighColor(make_color(255, 255, 255, 255));
-		view->SetPenSize(brightness + 0.5);
-#endif
+		view->SetPenSize(brightness + 1);
 
 		view->StrokeLine(BPoint(x, y), BPoint(x, y));
 		view->UnlockLooper();
@@ -177,9 +182,13 @@ int setInterval(void(callback)(), double interval)
 }
 
 int main(void) {
-	view = new SpaceView();
+	BScreen screen;
+	BRect frame = screen.Frame();
+	float size = fmin(frame.Height(), frame.Width());
 
-	BWindow* window = new BWindow(BRect(30, 30, 541, 541), "Spacewar!",
+	view = new SpaceView(BRect(0, 0, size, size));
+
+	BWindow* window = new BWindow(view->Bounds(), "Spacewar!",
 		B_TITLED_WINDOW, B_QUIT_ON_WINDOW_CLOSE | B_NOT_RESIZABLE, 0);
 	window->AddChild(view);
 	window->CenterOnScreen();
