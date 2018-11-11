@@ -74,7 +74,6 @@ static const int
 	starCaptureRadius =                      1,  // str      01  (greater zero)
 	collisionRadius =                       48,  // me1   06000  (screen coors)
 	collisionRadius2 =                      24,  // me2   03000  (above/2)
-	torpedoSpaceWarpage =                    9,  // the  sar 9s  (right shift)
 	hyperspaceShots =                        8,  // mhs     010  (number of)
 	hyperspaceTimeBeforeBreakout =          32,  // hd1     040  (frames)
 	hyperspaceTimeInBreakout =              64,  // hd2    0100  (frames)
@@ -82,11 +81,6 @@ static const int
 	hyperspaceDisplacement =                 9,  // hr1  scl 9s  (left shift)
 	hyperspaceInducedVelocity =              4,  // hr2  scl 4s  (left shift)
 	hyperspcaceUncertancy =              16384;  // hur  040000  (threshold bonus)
-
-static double Random()
-{
-	return (double)random() / RAND_MAX;
-}
 
 // game settings
 
@@ -207,11 +201,15 @@ class Spaceship: public CollidibleObject {
 			lastCtrl = 0;         // last control word             (nco, mco)
 		}
 
+		void spaceshipHandler();
+		void hyperspaceHandler();
+		void hyperspaceHandler2();
+
         double theta;
         Point (*outline)(double, double, double, double, double, double, double, double, double, double);
         int torpedoes;
         int fuel;
-		void(*hyp1)(CollidibleObject*);
+		void(CollidibleObject::*hyp1)(void);
         int hyp2;
         int hyp3;
         int hyp4;
@@ -222,173 +220,121 @@ class Spaceship: public CollidibleObject {
 
 // object handlers, this-object is current object (see mainLoop)
 
-static void explosionHandler(CollidibleObject* obj) {  /* (label mex) */
-	double x, y;
-	int mxc, f;
-	obj->y += obj->dy / 8;
-	obj->x += obj->dx / 8;
-	obj->toroidalize();
-	// particles
-	mxc = obj->size >> 3;
-	do {
-		/*
-			algorithm:
-			1) set up number of right shifts: (mxc > 96)? 1:3
-			2) set up number of left shifts: random number int 0..9
-			(shifts apply to a combined 36-bit register, 18 bits x and y each,
-               sign preserved in x. [x = AC, y = IO])
-              3) set x and y to signed 9-bit random numbers
-              4) apply right shifts (combined registers)
-              5) apply left shifts (combined registers)
-              6) add to position and display it
-              (only bits 17..9 (hsb-first) are significant for co-ordinates)
-
-              using floats, we apply mult/div instead of shifts:
-              mult/div factors are 1 << n.
-              any sign flips in y are ignored (just a random number).
-            */
-		f = (1 << (int)(floor(Random() * 9))) / ((mxc > 96)? 2:8);
-		x = (Random() - 0.5) * 2 * f;
-		y = (Random() - 0.5) * 2 * f;
-		plot(obj->x + x, obj->y + y, 3);
-	} while (--mxc > 0);
-	if (--obj->counter <= 0) obj->handler = NULL;
-}
-
-static void torpedoHandler(CollidibleObject* obj) {  /* (label trc) */
-	if (--obj->counter < 0) {
-		// time fuse
-		obj->counter = 2;
-		obj->handler = explosionHandler;
-		obj->collidible = false;
-	}
-	else {  /* (label t1c) */
-		obj->dy += obj->x / (512 * (1 << torpedoSpaceWarpage));
-		obj->y += obj->dy / 8;
-		obj->dx += obj->y / (512 * (1 << torpedoSpaceWarpage));
-		obj->x += obj->dx / 8;
-		obj->toroidalize();
-		plot(obj->x, obj->y, 1);
-	}
-}
-
-static void hyperspaceHandler2(CollidibleObject* obj1) {
-	Spaceship* obj = (Spaceship*)obj1;
+void Spaceship::hyperspaceHandler2() {
 	// "this routine handles a ship breaking out of hyperspace"
-	if (--obj->counter > 0) {
+	if (--counter > 0) {
 		// spend time in breakout, display a blip
-		plot(obj->x, obj->y, 2);
+		plot(x, y, 2);
 	}
 	else {
 		// zero, now check, restore spaceship handler
-		obj->handler = obj->hyp1;
-		obj->collidible = true;
-		obj->size = 1024;
-		if (obj->hyp2 > 0) obj->hyp2--; // decrement remaining jumps
-		obj->hyp3 = hyperspaceRechargeTime;
+		handler = hyp1;
+		collidible = true;
+		size = 1024;
+		if (hyp2 > 0) hyp2--; // decrement remaining jumps
+		hyp3 = hyperspaceRechargeTime;
 		// now check, if we break on re-entry (Mark One Hyperfield Generators ...)
-		obj->hyp4 += hyperspcaceUncertancy;
+		hyp4 += hyperspcaceUncertancy;
 		int r = ((int)(Random() * (1 << 20)) | 0) & 0x1FFFF; // 17-bits random
-		if (obj->hyp4 >= r) { // explode
-			obj->handler = explosionHandler;
-			obj->collidible = false;
-			obj->counter = 10;
+		if (hyp4 >= r) { // explode
+			handler = &Spaceship::explosionHandler;
+			collidible = false;
+			counter = 10;
 		}
 	}
 }
 
-static void hyperspaceHandler(CollidibleObject* obj) {
+void Spaceship::hyperspaceHandler() {
 	// "this routine handles a non-colliding ship invisibly in hyperspace"
-	if (--obj->counter == 0) { // spend time in hyperspace ...
+	if (--counter == 0) { // spend time in hyperspace ...
 		// zero, set up next step
-		obj->handler = hyperspaceHandler2;
+		handler = (Handler)&Spaceship::hyperspaceHandler2;
 		// this.size = 7; // not used here
 		// set up displacement
-		obj->x += (Random() * 2 - 1) * (1 << hyperspaceDisplacement);
-		obj->y += (Random() * 2 - 1) * (1 << hyperspaceDisplacement);
-		obj->toroidalize(); // maintain toroidal space (not in original)
+		x += (Random() * 2 - 1) * (1 << hyperspaceDisplacement);
+		y += (Random() * 2 - 1) * (1 << hyperspaceDisplacement);
+		toroidalize(); // maintain toroidal space (not in original)
 		// add induced velocity
-		obj->dx += (Random() * 2 - 1) * (1 << hyperspaceInducedVelocity);
-		obj->dy += (Random() * 2 - 1) * (1 << hyperspaceInducedVelocity);
+		dx += (Random() * 2 - 1) * (1 << hyperspaceInducedVelocity);
+		dy += (Random() * 2 - 1) * (1 << hyperspaceInducedVelocity);
 		// set up a random rotation
-		((Spaceship*)obj)->theta = TAU * Random();
+		theta = TAU * Random();
 		// original adds some instructions to keep it in bounds of 0 .. 2 PI
-		obj->counter = hyperspaceTimeInBreakout;
+		counter = hyperspaceTimeInBreakout;
 	}
 }
 
 static constexpr double angularAcceleration =     8 * BIN_RAD_COEF;  // maa     010  (turn, PI: 0144420)
-static void spaceshipHandler(CollidibleObject* co) {  /* (label sr0) */
-	Spaceship* ship = (Spaceship*)co;
+void Spaceship::spaceshipHandler() {  /* (label sr0) */
 	double am, Sin, Cos, bx, by, t1, t2, ssn, scn, sx1, sy1, stx, sty, ssm,
 		   ssc, ssd, scm, csn, src, csm;
 	int	m, f, thrusting = false;
 	Point p;
 	CollidibleObject* torp;
 	// rotation
-	am = ship->angularMomentum;
-	if (ship->ctrl & LEFT)  am += angularAcceleration;
-	if (ship->ctrl & RIGHT) am -= angularAcceleration;
+	am = angularMomentum;
+	if (ctrl & LEFT)  am += angularAcceleration;
+	if (ctrl & RIGHT) am -= angularAcceleration;
 	if (Options.ANGULARMOMENTUM) {
-		ship->angularMomentum = am;
+		angularMomentum = am;
 	}
 	else {
-		ship->angularMomentum = 0;
+		angularMomentum = 0;
 		am *= 128; // 1<<7
 	}
-	ship->theta += am;
+	theta += am;
 	// limit to +/- 2*PI
-	if (ship->theta > TAU) {
-		ship->theta -= TAU;
+	if (theta > TAU) {
+		theta -= TAU;
 	}
-	else if (ship->theta < -TAU) {
-		ship->theta += TAU;
+	else if (theta < -TAU) {
+		theta += TAU;
 	}
-	Sin = sin(ship->theta);
+	Sin = sin(theta);
 	bx = by = 0;
 	// gravity computations
 	if (!Options.SUNOFF) {
-		t1 = ship->x / 8;
-		t2 = ship->y / 8;
+		t1 = x / 8;
+		t2 = y / 8;
 		t1 = t1 * t1 + t2 * t2;
 		if (t1 < starCaptureRadius) { // in sun (label pof)
-			ship->dx = ship->dy = 0;
+			dx = dy = 0;
 			if (Options.SUNKILLS) { // explode (label po1)
-				ship->handler = explosionHandler;
-				ship->collidible = false;
-				ship->counter = 8;
+				handler = &Spaceship::explosionHandler;
+				collidible = false;
+				counter = 8;
 			}
 			else { // set ship to "anti pode"
-				ship->x = ship->y = COORS_MAX;
+				x = y = COORS_MAX;
 			}
 			return;
 		}
 		t1 = (sqrt(t1) * t1) / 2;
 		if (!Options.LOWGRAVITY) t1 /= 4;
-		bx = -ship->x / t1;
-		by = -ship->y / t1;
+		bx = -x / t1;
+		by = -y / t1;
 	}
 	// ... and back to business ...
-	Cos = cos(ship->theta);
+	Cos = cos(theta);
 	// rockets fired?
-	if ((ship->ctrl & THRUST) && ship->fuel) {
+	if ((ctrl & THRUST) && fuel) {
 		f = 1 << spaceshipAcceleration; // use div instead of right shift
 		by += Cos / f;
 		bx -= Sin / f;
 		thrusting = true;
 	}
 	// update positions
-	ship->dy += by;
-	ship->y  += ship->dy / 8;
-	ship->dx += bx;
-	ship->x  += ship->dx / 8;
-	ship->toroidalize();
+	dy += by;
+	y  += dy / 8;
+	dx += bx;
+	x  += dx / 8;
+	toroidalize();
 	// half a ship's length
 	ssn = Sin * 16;
 	scn = Cos * 16;
 	// outline start pos (stern, ahead of center)
-	sx1 = ship->x - ssn;
-	sy1 = ship->y + scn;
+	sx1 = x - ssn;
+	sy1 = y + scn;
 	// torpedoes will show up here
 	stx = sx1 - ssn;
 	sty = sy1 + scn;
@@ -401,7 +347,7 @@ static void spaceshipHandler(CollidibleObject* co) {  /* (label sr0) */
 	csn = ssn - scn;
 	csm = -csn;
 	scm = scn;
-	p = ship->outline(sx1, sy1, ssn, scn, ssm, ssc, ssd, csn, csm, scm);
+	p = outline(sx1, sy1, ssn, scn, ssm, ssc, ssd, csn, csm, scm);
 	sx1 = p.x;
 	sy1 = p.y;
 	// draw exhausts
@@ -410,59 +356,59 @@ static void spaceshipHandler(CollidibleObject* co) {  /* (label sr0) */
 		ssn = Sin * 2;
 		scn = Cos * 2;
 		// fuel consumption is a function of the blast's length!
-		while (ship->fuel > 0 && --src > 1) {
-			ship->fuel--;
+		while (fuel > 0 && --src > 1) {
+			fuel--;
 			sx1 += ssn;
 			sy1 -= scn;
 			plot (sx1, sy1, 0);
 		}
 	}
-	if (ship->counter > 0) { // torpedo cooling
-		ship->counter--;
+	if (counter > 0) { // torpedo cooling
+		counter--;
 	}
 	else if ( // fire, no single-shot-lock, and torpedoes left?
-			(ship->ctrl & FIRE)
-			&& (!Options.SINGLESHOTS || !(ship->lastCtrl & FIRE))
-			&& ship->torpedoes
+			(ctrl & FIRE)
+			&& (!Options.SINGLESHOTS || !(lastCtrl & FIRE))
+			&& torpedoes
 			) {
-		ship->torpedoes--;
+		torpedoes--;
 		// find empty object and set up the torpedo
 		for (m = 2; m < nob; m++) {
 			if (!mtb[m]->handler) {
 				torp = mtb[m];
-				torp->handler = torpedoHandler;
+				torp->handler = &Spaceship::torpedoHandler;
 				torp->collidible = true;
 				torp->x = stx;
 				torp->y = sty;
 				f = 1 << torpedoVelocity; // use div instead of right shift
-				torp->dx = ship->dx - Sin * 512 / f;
-				torp->dy = ship->dy + Cos * 512 / f;
+				torp->dx = dx - Sin * 512 / f;
+				torp->dy = dy + Cos * 512 / f;
 				torp->size = 16;
 				torp->counter = torpedoLife;
-				ship->counter = torpedoReloadTime;
+				counter = torpedoReloadTime;
 				break;
 			}
 		}
 	}
 	// hyperspace
-	if (ship->hyp3 > 0) { // cooling
-		ship->hyp3--;
+	if (hyp3 > 0) { // cooling
+		hyp3--;
 	}
-	else if (ship->hyp2 > 0) { // jumps remaining?
+	else if (hyp2 > 0) { // jumps remaining?
 		// are controls for left and right set and was neither of them set before?
 		// (last condition is thought to inhibit accidental jumps.
 		//  ignored in original, since the last control word is never saved,
 		//  works out as "if (this.ctrl) & Controls.HYPERSPACE)".)
-		if ((((~ship->ctrl) | ship->lastCtrl) & HYPERSPACE) == 0) {
-			ship->hyp1 = ship->handler;
-			ship->handler = hyperspaceHandler;
-			ship->collidible = false;
-			ship->counter = hyperspaceTimeBeforeBreakout;
+		if ((((~ctrl) | lastCtrl) & HYPERSPACE) == 0) {
+			hyp1 = handler;
+			handler = (Handler)&Spaceship::hyperspaceHandler;
+			collidible = false;
+			counter = hyperspaceTimeBeforeBreakout;
 			// this.size = 3; // not used here
 		}
 	}
 	// store last control word (missing in original)
-	ship->lastCtrl = ship->ctrl;
+	lastCtrl = ctrl;
 }
 
 // optional UI notifications
@@ -592,9 +538,9 @@ static void newGame() {  /* (label a40) */
 	for (i = 2; i < nob; i++) mtb.push_back( new CollidibleObject() );
 
 	// setup spaceships (label a2, a3)
-	ss1->handler = spaceshipHandler;
+	ss1->handler = (CollidibleObject::Handler)&Spaceship::spaceshipHandler;
 	ss1->collidible = true;
-	ss2->handler = spaceshipHandler;
+	ss2->handler = (CollidibleObject::Handler)&Spaceship::spaceshipHandler;
 	ss2->collidible = true;
 	ss1->x =  QUADRANT;
 	ss1->y =  QUADRANT;
@@ -658,7 +604,7 @@ static void mainLoop() {  /* (label ml0, ml1) */
 							double dy = fabs(obj1->y - obj2->y);
 							if (dy < collisionRadius && dx + dy < collisionRadius2) {
 								// explode
-								obj1->handler = obj2->handler = explosionHandler;
+								obj1->handler = obj2->handler = &CollidibleObject::explosionHandler;
 								obj1->collidible = obj2->collidible = false;
 								// set up explosion time & size
 								obj1->counter = obj2->counter = (obj1->size + obj2->size - 1) >> 8;
@@ -668,12 +614,12 @@ static void mainLoop() {  /* (label ml0, ml1) */
 				}
 			}
 			// call the object's method
-			obj1->handler(obj1);
+			(obj1->*obj1->handler)();
 		}
 	}
 	// handle last object, if any
 	obj1 = mtb[nnn];
-	if (obj1->handler) obj1->handler(obj1);
+	if (obj1->handler) (obj1->*obj1->handler)();
 
 	if (!Options.NOBACKGROUND)
 		ExpensivePlanetarium.update(); // background stars
@@ -703,8 +649,8 @@ static void frame() {  /* (label a) */
 		// check, if ships are alive and have any torpedoes left
 		ss1 = (Spaceship*)mtb[0];
 		ss2 = (Spaceship*)mtb[1];
-		thriving1 = (ss1->handler == spaceshipHandler);
-		thriving2 = (ss2->handler == spaceshipHandler);
+		thriving1 = (ss1->handler == (CollidibleObject::Handler)&Spaceship::spaceshipHandler);
+		thriving2 = (ss2->handler == (CollidibleObject::Handler)&Spaceship::spaceshipHandler);
 		if (thriving1 && thriving2
 				&& (ss1->torpedoes > 0 || ss2->torpedoes > 0)) {
 			// reset restart-counter
