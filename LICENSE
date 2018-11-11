@@ -1,0 +1,14 @@
+C++ port by Adrien Destugues <pulkomandy@pulkomandy.tk>, November 2018.
+
+Spacewar! 3.1, JS port by Norbert Landsteiner <www.masswerk.at>, March 2015.
+See: <http://www.masswerk.at/spacewar/JS-Spacewar/>.
+
+Spacewar! was conceived in 1961 by Martin Graetz, Stephen Russell, and Wayne
+Wiitanen. It was first realized on the PDP-1 in 1962 by Stephen Russell, Peter
+Samson, Dan Edwards, and Martin Graetz, together with Alan Kotok, Steve Piner,
+and Robert A Saunders. Spacewar! is in the public domain, but this credit
+paragraph must accompany all distributed versions of the program.
+
+The original program was written in PDP-1 assembler code, using MIT's "Macro"
+assembler: <http://www.masswerk.at/spacewar/sources/spacewar3.1_complete.txt>
+
