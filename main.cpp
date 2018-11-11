@@ -47,20 +47,30 @@ Hud::Hud(Spaceship* ship)
 void Hud::Draw(BRect updateRect)
 {
 	BString tmp;
+	float width = Bounds().Width();
+	BRect r(0, 0, 0, 10);
 
-	MovePenTo(2, 12);
-	tmp.SetToFormat("fuel: %d", fShip->fuel);
-	DrawString(tmp);
-	MovePenTo(2, 24);
-	tmp.SetToFormat("torp: %d", fShip->torpedoes);
-	DrawString(tmp);
-	MovePenTo(2, 36);
-	tmp.SetToFormat("jump: %d", fShip->hyp2);
-	DrawString(tmp);
-	MovePenTo(2, 48);
-	tmp.SetToFormat("cool: %d", fShip->hyp3);
-	DrawString(tmp);
-	MovePenTo(2, 60);
+	rgb_color c = view->HighColor();
+	//rgb_color w = make_color(255, 255, 255, 255);
+
+	r.right = width * fShip->fuel / fuelSupply;
+	FillRect(r, B_SOLID_HIGH);
+	MovePenTo(r.left, r.bottom);
+	r.OffsetBy(0, 12);
+
+	r.right = width * fShip->torpedoes / torpedoSupply;
+	FillRect(r, B_SOLID_HIGH);
+	r.OffsetBy(0, 12);
+
+	r.right = width * fShip->hyp2 / hyperspaceShots;
+	FillRect(r, B_SOLID_HIGH);
+	r.OffsetBy(0, 12);
+
+	r.right = width * fShip->hyp3 / hyperspaceRechargeTime;
+	FillRect(r, B_SOLID_HIGH);
+	r.OffsetBy(0, 12);
+
+	MovePenTo(2, r.bottom + 12);
 	tmp.SetToFormat("score: %d", fScore);
 	DrawString(tmp);
 }
