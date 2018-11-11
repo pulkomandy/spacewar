@@ -348,7 +348,9 @@ class Spacewar {
 		ss2 = new Spaceship();
 
         // clear and init table of objects (label a2)
-        mtb.clear(); // FIXME anything to free?
+		for(auto i: mtb)
+			delete i;
+        mtb.clear();
         mtb.push_back(ss1);
         mtb.push_back(ss2);
         for (i = 2; i < nob; i++) mtb.push_back( new CollidibleObject() );
@@ -1030,5 +1032,4 @@ void SetControls(int ship, int key, int value)
 }
 
 constexpr bool Spacewar::legalInputs[];
-
 Planetarium Spacewar::ExpensivePlanetarium;
